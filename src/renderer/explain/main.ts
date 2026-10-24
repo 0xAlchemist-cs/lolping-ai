@@ -1,6 +1,7 @@
 import { MAX_QUESTION } from '../../shared/explain';
 import type { AiErrorCode } from '../../shared/aiConfig';
 import type { ExplainText } from '../../shared/ipc';
+import { VisionPreview } from './visionPreview';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const title = $('title');
@@ -22,6 +23,19 @@ const failureText = $('failureText');
 const retry = $('retry') as HTMLButtonElement;
 const copy = $('copy') as HTMLButtonElement;
 const copied = $('copied');
+const vision = new VisionPreview(window.explainApi, {
+  open: $<HTMLButtonElement>('previewOpen'), close: $<HTMLButtonElement>('previewClose'),
+  text: $('textView'), preview: $('visionView'), privacy: $('visionPrivacy'), timing: $('visionTiming'),
+  status: $('visionStatus'), images: $('visionImages'),
+  local: $<HTMLImageElement>('visionLocal'), full: $<HTMLImageElement>('visionFull'),
+  localCaption: $('visionLocalCaption'), fullCaption: $('visionFullCaption'),
+  localMarker: $('visionLocalMarker'), fullMarker: $('visionFullMarker'),
+});
+const stopVisionSession = window.explainApi.onVisionSession((sessionId) => vision.setSession(sessionId));
+window.addEventListener('beforeunload', () => {
+  stopVisionSession();
+  vision.destroy();
+});
 
 let words: ExplainText | null = null;
 let lastId: number | null = null;
@@ -165,8 +179,12 @@ void window.explainApi.strings().then((t) => {
   openSettingsBtn.textContent = t.openSettings;
   setupTitle.textContent = t.unconfigured;
   setupHint.textContent = t.unconfiguredHint;
+  vision.setWords(t.vision);
 });
 void window.explainApi.state().then((s) => {
-  if (s && !s.configured) setState('unconfigured');
+  if (!s) return;
+  if (!s.configured) setState('unconfigured');
+  vision.setSession(s.visionSessionId);
+  vision.setAvailable(s.captureAvailable);
 });
 requestAnimationFrame(() => question.focus());

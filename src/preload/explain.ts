@@ -7,6 +7,7 @@ import type { ExplainApi, ExplainEvent } from '../shared/ipc';
 const EXPLAIN_CH = {
   ask: 'explain:ask', stop: 'explain:stop', strings: 'explain:strings', close: 'explain:close', openSettings: 'explain:openSettings',
   event: 'explain:event', state: 'explain:state',
+  capture: 'explain:capture', closePreview: 'explain:closePreview', visionSession: 'explain:visionSession',
 } as const;
 
 const api: ExplainApi = {
@@ -17,6 +18,13 @@ const api: ExplainApi = {
   state: () => ipcRenderer.invoke(EXPLAIN_CH.state),
   close: () => ipcRenderer.send(EXPLAIN_CH.close),
   openSettings: () => ipcRenderer.send(EXPLAIN_CH.openSettings),
+  capture: (sessionId) => ipcRenderer.invoke(EXPLAIN_CH.capture, sessionId),
+  closePreview: (sessionId) => ipcRenderer.send(EXPLAIN_CH.closePreview, sessionId),
+  onVisionSession: (cb) => {
+    const handler = (_e: IpcRendererEvent, sessionId: number) => cb(sessionId);
+    ipcRenderer.on(EXPLAIN_CH.visionSession, handler);
+    return () => ipcRenderer.removeListener(EXPLAIN_CH.visionSession, handler);
+  },
   on: (cb) => {
     const handler = (_e: IpcRendererEvent, ev: ExplainEvent) => cb(ev);
     ipcRenderer.on(EXPLAIN_CH.event, handler);
