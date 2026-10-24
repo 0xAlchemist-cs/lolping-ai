@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { EXPLAIN_CH } from '../../src/shared/ipc';
 
@@ -14,6 +15,38 @@ import { EXPLAIN_CH } from '../../src/shared/ipc';
 const preloadDir = resolve(__dirname, '../../src/preload');
 const explainSource = readFileSync(join(preloadDir, 'explain.ts'), 'utf8');
 const preloadSources = readdirSync(preloadDir).filter((f) => f.endsWith('.ts'));
+const builtDir = resolve(__dirname, '../../out/preload');
+const expectedPreloads = ['explain', 'overlay', 'panel', 'settings', 'text'];
+
+/** Executes the build with the sandbox's restricted require, rather than trusting a chunk directory name. */
+function loadSandboxBundle(name: string): {
+  exposed: Record<string, Record<string, unknown>>;
+  calls: Array<{ method: string; channel: string; args: unknown[] }>;
+} {
+  const exposed: Record<string, Record<string, unknown>> = {};
+  const calls: Array<{ method: string; channel: string; args: unknown[] }> = [];
+  const ipcRenderer = Object.fromEntries(['send', 'invoke', 'on', 'removeListener'].map((method) => [
+    method,
+    (channel: string, ...args: unknown[]) => {
+      calls.push({ method, channel, args });
+      return method === 'invoke' ? Promise.resolve(null) : undefined;
+    },
+  ]));
+  const electron = {
+    contextBridge: { exposeInMainWorld: (key: string, api: Record<string, unknown>) => { exposed[key] = api; } },
+    ipcRenderer,
+  };
+  runInNewContext(readFileSync(join(builtDir, `${name}.js`), 'utf8'), {
+    require: (id: string) => {
+      if (id !== 'electron') throw new Error(`Sandbox preload attempted unsupported require: ${id}`);
+      return electron;
+    },
+    process: { platform: 'win32' },
+    exports: {},
+    module: { exports: {} },
+  }, { filename: `${name}.js`, timeout: 1000 });
+  return { exposed, calls };
+}
 
 /** True when `source` imports RUNTIME values (not just types) from '../shared/ipc'. Handles multi-line imports. */
 const valueImportsSharedIpc = (source: string): boolean => {
@@ -38,7 +71,7 @@ describe('preload sandbox bundle safety', () => {
     const m = explainSource.match(/const EXPLAIN_CH = \{([\s\S]*?)\} as const/);
     expect(m, 'explain.ts must keep a local, inlined EXPLAIN_CH constant').not.toBeNull();
     for (const [key, channel] of Object.entries(EXPLAIN_CH)) {
-      expect(m![1], `explain.ts local EXPLAIN_CH.${key}`).toMatch(new RegExp(`${key}\\s*:\\s*'${channel}'`));
+      expect(m?.[1], `explain.ts local EXPLAIN_CH.${key}`).toMatch(new RegExp(`${key}\\s*:\\s*'${channel}'`));
     }
   });
 
@@ -47,5 +80,39 @@ describe('preload sandbox bundle safety', () => {
     // rollup only creates chunks/ when it split shared code between preload entries; a sandboxed
     // preload cannot require those files, so its mere presence is the outage's fingerprint.
     expect(existsSync(outChunks), 'out/preload/chunks must not exist after a build').toBe(false);
+  });
+
+  it.skipIf(!existsSync(builtDir))('contains exactly the independent production preload entries', () => {
+    expect(readdirSync(builtDir).filter((file) => file.endsWith('.js')).sort())
+      .toEqual(expectedPreloads.map((name) => `${name}.js`));
+  });
+
+  it.skipIf(!existsSync(builtDir)).each(expectedPreloads)('loads %s alone with only Electron available', (name) => {
+    const { exposed } = loadSandboxBundle(name);
+    const expectedName = name === 'overlay' ? name : `${name}Api`;
+    expect(Object.keys(exposed)).toEqual([expectedName]);
+    expect(Object.values(exposed[expectedName]).some((value) => typeof value === 'function')).toBe(true);
+  });
+
+  it.skipIf(!existsSync(builtDir))('exposes bounded vision commands through the standalone explain bridge', async () => {
+    const { exposed, calls } = loadSandboxBundle('explain');
+    const api = exposed.explainApi as {
+      capture: (sessionId: number) => Promise<unknown>;
+      closePreview: (sessionId: number) => void;
+      onVisionSession: (cb: (id: number) => void) => () => void;
+    };
+    await api.capture(7);
+    api.closePreview(7);
+    const unsubscribe = api.onVisionSession(() => undefined);
+    unsubscribe();
+    expect(calls.map(({ method, channel }) => [method, channel])).toEqual([
+      ['invoke', EXPLAIN_CH.capture],
+      ['send', EXPLAIN_CH.closePreview],
+      ['on', EXPLAIN_CH.visionSession],
+      ['removeListener', EXPLAIN_CH.visionSession],
+    ]);
+    expect(calls[0].args).toEqual([7]);
+    expect(calls[1].args).toEqual([7]);
+    expect(calls[2].args[0]).toBe(calls[3].args[0]);
   });
 });

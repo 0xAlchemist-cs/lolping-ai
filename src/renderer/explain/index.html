@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'none'" />
   <title>lolPing explain</title>
   <link rel="stylesheet" href="explain.css" />
 </head>
@@ -12,29 +12,56 @@
       <h1 id="title">Ask about this</h1>
       <button id="close" type="button" aria-label="Close">✕</button>
     </header>
-    <form id="ask">
-      <input id="question" type="text" autocomplete="off" spellcheck="false" maxlength="200" />
-      <button id="send" type="submit">Ask</button>
-      <button id="stop" type="button" hidden>Stop</button>
-    </form>
-    <p id="hint" class="hint"></p>
-    <section id="setup" class="setup" hidden>
-      <p id="setupTitle" class="setupTitle"></p>
-      <p id="setupHint" class="setupHint"></p>
-      <button id="openSettings" type="button"></button>
+    <div class="visionToolbar">
+      <button id="previewOpen" type="button" hidden disabled></button>
+      <button id="previewClose" type="button" hidden></button>
+    </div>
+    <section id="textView" class="textView">
+      <form id="ask">
+        <input id="question" type="text" autocomplete="off" spellcheck="false" maxlength="200" />
+        <button id="send" type="submit">Ask</button>
+        <button id="stop" type="button" hidden>Stop</button>
+      </form>
+      <p id="hint" class="hint"></p>
+      <section id="setup" class="setup" hidden>
+        <p id="setupTitle" class="setupTitle"></p>
+        <p id="setupHint" class="setupHint"></p>
+        <button id="openSettings" type="button"></button>
+      </section>
+      <article id="answer" class="answer" hidden>
+        <div id="body"></div>
+      </article>
+      <section id="failure" class="failure" hidden>
+        <p id="failureTitle" class="failureTitle"></p>
+        <p id="failureText" class="failureText"></p>
+        <button id="retry" type="button"></button>
+      </section>
+      <footer>
+        <button id="copy" type="button" disabled>Copy</button>
+        <span id="copied"></span>
+      </footer>
     </section>
-    <article id="answer" class="answer" hidden>
-      <div id="body"></div>
-    </article>
-    <section id="failure" class="failure" hidden>
-      <p id="failureTitle" class="failureTitle"></p>
-      <p id="failureText" class="failureText"></p>
-      <button id="retry" type="button"></button>
+    <section id="visionView" class="visionView" hidden>
+      <p id="visionPrivacy" class="visionPrivacy"></p>
+      <p id="visionTiming" class="hint"></p>
+      <p id="visionStatus" class="hint" role="status" aria-live="polite"></p>
+      <div id="visionImages" hidden>
+        <figure>
+          <figcaption id="visionLocalCaption"></figcaption>
+          <div class="visionImage">
+            <img id="visionLocal" alt="" draggable="false" />
+            <span id="visionLocalMarker" class="visionMarker" role="img"></span>
+          </div>
+        </figure>
+        <figure>
+          <figcaption id="visionFullCaption"></figcaption>
+          <div class="visionImage">
+            <img id="visionFull" alt="" draggable="false" />
+            <span id="visionFullMarker" class="visionMarker" role="img"></span>
+          </div>
+        </figure>
+      </div>
     </section>
-    <footer>
-      <button id="copy" type="button" disabled>Copy</button>
-      <span id="copied"></span>
-    </footer>
   </main>
   <script type="module" src="main.ts"></script>
 </body>

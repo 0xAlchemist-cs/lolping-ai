@@ -27,6 +27,8 @@ import { checkEndpoint, guardResolvedAddresses, isExplicitLoopback, validModel, 
 import { closeExplainWindow, openExplainWindow, registerExplainWindow } from './explainWindow';
 import { AiError, pingEndpoint, streamChat } from './aiClient';
 import { AiKeyStore } from './aiKeyStore';
+import { captureVision } from './visionCapture';
+import { withCaptureWindowsHidden } from './captureWindows';
 import { isFile } from './fileState';
 import { InputBridge } from './inputBridge';
 import { LanTransport } from './lanTransport';
@@ -339,7 +341,14 @@ function start(): void {
   // report alone, so trigger+click, previews and room members can never open it.
   overlays.on('wheelPing', (p: SharedPing) => {
     if (p.id !== 'missing' || !featureOn(settings, 'aiExplain') || quitting) return;
-    openExplainWindow(screen.getCursorScreenPoint(), { ...text().explainWindow, errors: text().aiError });
+    const display = screen.getAllDisplays().find((d) => d.id === p.displayId);
+    if (!display) return;
+    const point = process.platform === 'win32'
+      ? { x: display.bounds.x + p.x, y: display.bounds.y + p.y } : screen.getCursorScreenPoint();
+    openExplainWindow(point,
+      { ...text().explainWindow, errors: text().aiError },
+      process.platform === 'win32' ? { displayId: p.displayId, x: p.x, y: p.y,
+        bounds: { ...display.bounds }, scaleFactor: display.scaleFactor } : undefined);
   });
 
   // P1B: real model answers. One request at a time; the key lives only in the key store and the Authorization header.
@@ -410,6 +419,7 @@ function start(): void {
     cancel: aiCancel,
     configured: aiConfigured,
     openSettings: () => openSettingsWindow('features'),
+    capture: (target) => withCaptureWindowsHidden(() => captureVision(target)),
   });
   room.on('remoteEmote', (p) => {
     if (featureOn(settings, 'emotes')) overlays.spawnRemoteEmote(p);

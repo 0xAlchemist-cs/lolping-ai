@@ -1,8 +1,9 @@
-import { BrowserWindow, ipcMain, screen } from 'electron';
+import { BrowserWindow, ipcMain, screen, type IpcMainInvokeEvent } from 'electron';
 import { EXPLAIN_CH, type ExplainEvent, type ExplainState, type ExplainText } from '../shared/ipc';
 import { parseQuestion } from '../shared/explain';
 import { placeInside } from './coords';
 import { IS_MAC, loadPage, pageUrl, preloadPath } from './paths';
+import { MAX_VISION_DATA_URL_CHARS, type VisionReply, type VisionResult, type VisionTarget } from '../shared/vision';
 
 /** The card's size in DIPs: a question box, the streamed answer and two buttons. */
 const WIDTH = 460;
@@ -20,6 +21,8 @@ export interface ExplainDeps {
   configured: () => boolean;
   /** Opens the settings window at the AI section. */
   openSettings: () => void;
+  /** Local capture only. No model, settings or key access belongs in this dependency. */
+  capture?: (target: VisionTarget) => Promise<VisionResult>;
 }
 
 let win: BrowserWindow | null = null;
@@ -28,6 +31,11 @@ let deps: ExplainDeps | null = null;
 let currentId = 0;
 let generating = false;
 let hasAnswer = false;
+let visionSessionId = 0;
+let visionRevision = 0;
+let visionTarget: VisionTarget | null = null;
+let captureInProgress = false;
+let previewOpen = false;
 const goneListeners: Array<() => void> = [];
 
 export function onExplainWindowGone(cb: () => void): void {
@@ -69,8 +77,50 @@ export function registerExplainWindow(d: ExplainDeps): void {
   ipcMain.handle(EXPLAIN_CH.strings, (event): ExplainText | null => (win?.webContents === event.sender ? words : null));
   ipcMain.handle(EXPLAIN_CH.state, (event): ExplainState | null => {
     if (win?.webContents !== event.sender) return null;
-    return { configured: deps?.configured() ?? false };
+    return { configured: deps?.configured() ?? false, visionSessionId, captureAvailable: !!visionTarget && !!deps?.capture };
   });
+  ipcMain.handle(EXPLAIN_CH.capture, async (event, raw: unknown): Promise<VisionReply | null> => {
+    const owner = win;
+    if (!owner || !ownsMainFrame(event, owner) || raw !== visionSessionId) return null;
+    const sessionId = visionSessionId;
+    if (captureInProgress) return { sessionId, result: { ok: false, code: 'busy' } };
+    const capture = deps?.capture;
+    const target = visionTarget;
+    if (!capture || !target) return { sessionId, result: { ok: false, code: 'unavailable' } };
+    const revision = ++visionRevision;
+    captureInProgress = true; // Set before hiding: hide emits blur synchronously on Windows.
+    previewOpen = true;
+    try {
+      const result = await capture(target);
+      if (win !== owner || owner.isDestroyed() || !ownsMainFrame(event, owner)
+        || sessionId !== visionSessionId || revision !== visionRevision) return null;
+      if (result.ok && result.preview.local.dataUrl.length + result.preview.full.dataUrl.length > MAX_VISION_DATA_URL_CHARS) {
+        return { sessionId, result: { ok: false, code: 'tooLarge' } };
+      }
+      return { sessionId, result };
+    } catch {
+      if (win !== owner || owner.isDestroyed() || revision !== visionRevision || !ownsMainFrame(event, owner)) return null;
+      return { sessionId, result: { ok: false, code: 'windowsNotHidden' } };
+    } finally {
+      captureInProgress = false;
+      // A replacement card may have reached ready-to-show while the capture scope kept it hidden.
+      if (win && win !== owner && !win.isDestroyed()) {
+        win.show();
+        win.focus();
+      }
+    }
+  });
+  ipcMain.on(EXPLAIN_CH.closePreview, (event, raw: unknown) => {
+    if (!win || !ownsMainFrame(event, win) || raw !== visionSessionId) return;
+    visionRevision += 1;
+    previewOpen = false;
+    // Main keeps no screenshot cache. The renderer drops both image sources on this transition.
+  });
+}
+
+function ownsMainFrame(event: Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>, owner: BrowserWindow): boolean {
+  return !owner.isDestroyed() && event.sender === owner.webContents
+    && event.senderFrame !== null && event.senderFrame === owner.webContents.mainFrame;
 }
 
 /** Only the newest stream may draw, and only while the window exists — late events from a replaced or dead request die here. */
@@ -86,11 +136,18 @@ function sink(ev: ExplainEvent): void {
 }
 
 /** Opens the card with its top-left corner at `point` (a screen point in DIPs), inside that display's work area. */
-export function openExplainWindow(point: { x: number; y: number }, text: ExplainText): void {
+export function openExplainWindow(point: { x: number; y: number }, text: ExplainText, target?: VisionTarget): void {
+  visionSessionId += 1;
+  visionRevision += 1;
+  visionTarget = target ? { ...target, bounds: { ...target.bounds } } : null;
+  previewOpen = false;
   if (win && !win.isDestroyed()) {
     // A second gesture while the card is up shows the card it already has; spawning another would steal focus twice.
-    win.show();
-    win.focus();
+    win.webContents.mainFrame.send(EXPLAIN_CH.visionSession, visionSessionId);
+    if (!captureInProgress) {
+      win.show();
+      win.focus();
+    }
     return;
   }
   words = text;
@@ -113,7 +170,8 @@ export function openExplainWindow(point: { x: number; y: number }, text: Explain
     show: false,
     // macOS: a non-activating panel takes key focus without making lolPing the active app.
     ...(IS_MAC ? { type: 'panel' as const } : {}),
-    webPreferences: { preload: preloadPath('explain'), spellcheck: false },
+    webPreferences: { preload: preloadPath('explain'), spellcheck: false, sandbox: true, contextIsolation: true,
+      nodeIntegration: false, ...(process.platform === 'win32' ? { backgroundThrottling: false } : {}) },
   });
   win = w;
   // Every way the card can end goes through close(), whose 'closed' event tells the app it is gone.
@@ -131,6 +189,9 @@ function setup(w: BrowserWindow): void {
     currentId += 1;
     generating = false;
     hasAnswer = false;
+    visionTarget = null;
+    visionRevision += 1;
+    previewOpen = false;
     deps?.cancel();
     for (const cb of goneListeners) cb();
   });
@@ -142,11 +203,12 @@ function setup(w: BrowserWindow): void {
   // Clicking away closes an empty, idle card — the P1A behaviour. While an answer is streaming or on screen the card
   // stays, so reading it or glancing at another window never throws the answer away. Esc and ✕ always close.
   w.on('blur', () => {
-    if (focused && !generating && !hasAnswer) w.close();
+    if (focused && !generating && !hasAnswer && !captureInProgress && !previewOpen) w.close();
   });
-  setTimeout(() => {
-    if (!w.isDestroyed() && !focused) w.close();
+  const focusTimer = setTimeout(() => {
+    if (!w.isDestroyed() && !focused && !captureInProgress && !previewOpen) w.close();
   }, FOCUS_WAIT_MS);
+  w.once('closed', () => clearTimeout(focusTimer));
   w.once('ready-to-show', () => {
     w.show();
     w.focus();

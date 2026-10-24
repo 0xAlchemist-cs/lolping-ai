@@ -445,3 +445,48 @@ A fork feature, off by default (`aiExplain` in `features.ts`). Turning it on add
 - **Window (`explainWindow.ts` + `renderer/explain/`):** four states — unconfigured (a hint and an Open Settings button), generating (streaming text and a Stop button), done (copy enabled), error (the code's wording and Retry). Model output is untrusted text rendered only through `textContent`. P1A's blur-close now applies only to an empty, idle card: an answer on screen or a stream in flight keeps the window through focus changes; Esc and ✕ always close. A failed ask re-enables the Ask button (P1A left it stuck), and a failed copy says so.
 - **Lifecycle:** stop button, Esc, ✕, feature-off, app quit and a new question each cancel the in-flight request; the window's `closed` handler cancels too.
 - **Tests:** endpoint validation and DNS-guard matrices, key-store round-trip/refusal/never-plaintext-on-disk, SSE split/[DONE]/error/abort/timeout/cap, explain-IPC sender checks and stale-event drops, and the P1A regression set (wheel sourcing, R11 click exclusion, room broadcast untouched). CI uses injected fakes; no cloud calls.
+
+### Local screen preview (fork, P2A-1, Windows)
+
+The same Enemy Missing card has an explicit local preview action, including when no AI key is configured. Opening the
+card never captures. `Wheel.release()` returns its original centre, not the release endpoint. Main freezes that local
+DIP point, display ID, bounds and scale in a separate vision session. A new gesture clears the old preview and invalidates
+pending images without changing the text stream. Display removal or changed geometry requires a new gesture.
+
+`visionCapture.ts` selects the exact `display_id` from Electron's screen sources. Coordinates use the returned image's
+actual pixel width and height divided by the saved display's DIP width and height. Global physical coordinates from the
+helper and global Electron DIPs are not reused for this conversion. The crop is at most 640 × 480 pixels and shifts
+inside all four edges. The full monitor preview preserves the whole monitor and its aspect ratio, scaled to at most
+1920 × 1080. Both JPEGs carry normalised markers for the same original image pixel.
+
+`captureWindows.ts` temporarily protects and hides this app's windows, including windows created or shown during the
+operation. A constant PowerShell command calls the system DWM API before capture. It carries no image or user input,
+uses no Hook, and times out after five seconds. `DwmFlush` in that child is an additional composition wait, not a
+cross-process rendering fence: Microsoft only promises flushing the caller's queued changes. Native hidden-state checks,
+temporary content protection and a real coloured-target capture test provide the additional checks. Exclusion on every
+Windows compositor, remote session or protected full-screen application is not claimed. The scope restores surviving
+windows in `finally`; protection restoration failure cannot skip visibility restoration. The explain card suppresses
+blur and its initial focus watchdog while capturing and while a preview is open. A replacement card regains focus.
+
+Electron's `getSources` has no per-display filter: it transiently produces thumbnails for all connected monitors.
+Only the exact target is cropped, encoded or sent to a renderer; there is no primary-monitor fallback or virtual-desktop
+stitching. Requested and returned aggregate thumbnails are capped at 32 Mi pixels, each side at 8192 pixels, and the
+two data URLs together at 8 Mi characters. The screen-source request has a ten-second deadline. A timed-out native
+request stays busy until it settles, so retries cannot accumulate native allocations while windows are restored.
+
+Only the owning explain main frame may request or receive images, using a main-generated session number. Main keeps no
+image cache. The page clears both image sources on close, reentry and unload, and ignores late replies. Images are used
+only as JPEG `<img>` sources; screen content is never executable markup. The card's CSP blocks direct connections.
+Capture has no dependency on the AI client, API key store, room, settings, clipboard or file-writing code. It neither
+uploads nor saves screenshots and never appends one to a text request, log or application diagnostic. This does not
+promise control over operating-system memory dumps or Chromium's internal memory management.
+
+`node tools/vision-smoke.cjs` (after `npm run build`) loads the actual sandbox preloads and production renderer in real
+Electron with an isolated profile. It exercises synthetic wheel events, a known coloured desktop target, both JPEGs,
+markers, exclusion/restoration, image release, session replacement, text streaming, stop and Esc. It checks only metadata
+and in-memory pixels, with no screenshot files. These checks do not replace physical Alt + drag, mixed-DPI hardware,
+normal-browser content or restart acceptance, which must be recorded separately as `MANUAL PENDING` when not observed.
+
+References: [Electron desktopCapturer](https://www.electronjs.org/docs/latest/api/desktop-capturer),
+[Electron content protection](https://www.electronjs.org/docs/latest/api/browser-window#winsetcontentprotectionenable-macos-windows),
+[Microsoft DwmFlush](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmflush).

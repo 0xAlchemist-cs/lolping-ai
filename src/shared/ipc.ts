@@ -11,6 +11,7 @@ import { PEER_RE } from './roomProtocol';
 import type { OverlaySettings, RoomTextStyle, Settings } from './settings';
 import type { UpdateState } from './update';
 import type { VoteView } from './voteTally';
+import type { VisionReply, VisionText } from './vision';
 
 export interface Point {
   x: number;
@@ -79,6 +80,7 @@ export const PANEL_CH = { state: 'panel:state', action: 'panel:action' } as cons
 export const EXPLAIN_CH = {
   ask: 'explain:ask', stop: 'explain:stop', strings: 'explain:strings', close: 'explain:close', openSettings: 'explain:openSettings',
   event: 'explain:event', state: 'explain:state',
+  capture: 'explain:capture', closePreview: 'explain:closePreview', visionSession: 'explain:visionSession',
 } as const;
 
 /** The explain window's words, in the language the app uses. */
@@ -100,6 +102,7 @@ export interface ExplainText {
   errorTitle: string;
   /** Why a request failed, by code, in the app language. */
   errors: Partial<Record<AiErrorCode, string>>;
+  vision: VisionText;
 }
 
 /** One push from the main process to the explain window. `id` orders the stream; the page ignores a stale id. */
@@ -111,6 +114,8 @@ export type ExplainEvent =
 /** `configured` is false until endpoint, model and a saved key all exist; the page shows the setup hint then. */
 export interface ExplainState {
   configured: boolean;
+  visionSessionId: number;
+  captureAvailable: boolean;
 }
 
 /**
@@ -124,6 +129,9 @@ export interface ExplainApi {
   state(): Promise<ExplainState | null>;
   close(): void;
   openSettings(): void;
+  capture(sessionId: number): Promise<VisionReply | null>;
+  closePreview(sessionId: number): void;
+  onVisionSession(cb: (sessionId: number) => void): () => void;
   /** Streams answer events into the page; returns the way to stop listening. */
   on(cb: (ev: ExplainEvent) => void): () => void;
 }

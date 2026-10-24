@@ -3,6 +3,7 @@ import type { FeatureId } from './features';
 import type { PingId } from './pings';
 import type { Platform } from './platform';
 import type { MemberPath } from './room';
+import type { VisionText } from './vision';
 
 export type Lang = 'en' | 'zh-CN';
 /** The language setting: 'auto' follows the system display language. */
@@ -233,6 +234,27 @@ const en = {
     openSettings: 'Open Settings',
     generating: 'Thinking…',
     errorTitle: 'The request failed',
+    vision: {
+      open: 'Local screenshot preview',
+      close: 'Close preview',
+      loading: 'Capturing the ping display…',
+      privacy: 'Local preview only. Not uploaded.',
+      timing: 'Captured when you click preview, around the original ping position.',
+      local: 'Area around the ping',
+      full: 'Entire ping display',
+      marker: 'Original ping position',
+      errors: {
+        unavailable: 'Local screenshot preview is unavailable here.',
+        displayGone: 'The ping display is no longer connected. Place a new ping.',
+        displayChanged: 'The ping display settings changed. Place a new ping.',
+        empty: 'The display returned an empty image. Try again.',
+        tooLarge: 'The display image exceeds the local preview limit.',
+        captureFailed: 'Could not capture the display. Try again.',
+        windowsNotHidden: 'Could not hide lolPing windows for capture. Try again.',
+        busy: 'A screenshot is already in progress. Try again after it finishes.',
+        stale: 'This preview no longer belongs to the current ping. Try again.',
+      },
+    } satisfies VisionText,
   },
   aiError: {
     auth: 'The service rejected the API key (401/403).',
@@ -630,6 +652,27 @@ const zh: Strings = {
     openSettings: '打开设置',
     generating: '思考中…',
     errorTitle: '请求失败',
+    vision: {
+      open: '本地截图预览',
+      close: '关闭预览',
+      loading: '正在截取问号所在的显示器…',
+      privacy: '仅本地预览，未上传。',
+      timing: '点击预览时截图，定位到原始问号位置。',
+      local: '问号附近的局部截图',
+      full: '问号所在的完整显示器',
+      marker: '原始问号位置',
+      errors: {
+        unavailable: '当前环境无法使用本地截图预览。',
+        displayGone: '问号所在的显示器已断开，请重新打出问号。',
+        displayChanged: '问号所在显示器的设置已更改，请重新打出问号。',
+        empty: '显示器返回了空图片，请重试。',
+        tooLarge: '显示器图片超过了本地预览的大小上限。',
+        captureFailed: '无法截取显示器，请重试。',
+        windowsNotHidden: '截图前未能隐藏 lolPing 窗口，请重试。',
+        busy: '截图正在进行，请等待完成后重试。',
+        stale: '此预览已不属于当前问号，请重试。',
+      },
+    } satisfies VisionText,
   },
   aiError: {
     auth: '服务拒绝了 API 密钥（401/403）。',
