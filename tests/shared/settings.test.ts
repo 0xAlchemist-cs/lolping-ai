@@ -566,10 +566,12 @@ describe('update settings', () => {
 });
 
 describe('feature settings', () => {
-  it('loads a 0.5.2 settings file with every feature on', () => {
+  it('loads a 0.5.2 settings file with every upstream feature on, and aiExplain off', () => {
     const { features: _features, ...old } = DEFAULT_SETTINGS;
     expect(normalizeSettings(old).features).toEqual(DEFAULT_SETTINGS.features);
-    expect(Object.values(normalizeSettings(old).features).every((v) => v)).toBe(true);
+    const { aiExplain, ...rest } = normalizeSettings(old).features;
+    expect(Object.values(rest).every((v) => v)).toBe(true);
+    expect(aiExplain).toBe(false); // a new window-opening feature starts off, whatever the old file knew
   });
 
   it('keeps a switched-off feature', () => {

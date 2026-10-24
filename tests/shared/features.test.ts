@@ -2,9 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_FEATURES, featureOn, liveKeys, normalizeFeatures, roomFeaturesOff } from '../../src/shared/features';
 
 describe('features', () => {
-  it('turns everything on by default', () => {
+  it('turns the room and emote features on by default, and aiExplain off', () => {
     expect(normalizeFeatures(undefined)).toEqual(DEFAULT_FEATURES);
-    expect(Object.values(DEFAULT_FEATURES).every((v) => v)).toBe(true);
+    const { aiExplain, ...rest } = DEFAULT_FEATURES;
+    expect(Object.values(rest).every((v) => v)).toBe(true);
+    expect(aiExplain).toBe(false);
+  });
+
+  it('keeps aiExplain off in an old settings file, and honours an explicit choice', () => {
+    expect(normalizeFeatures({})).toEqual(DEFAULT_FEATURES);
+    expect(normalizeFeatures({ aiExplain: true })).toEqual({ ...DEFAULT_FEATURES, aiExplain: true });
   });
 
   it('repairs a broken value key by key', () => {

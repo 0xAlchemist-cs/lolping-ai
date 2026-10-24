@@ -45,7 +45,9 @@ const RAISING_CHANNELS: ReadonlySet<OverlayChannel> = new Set<OverlayChannel>(['
 /**
  * One transparent, click-through, always-on-top window per display.
  * Emits 'shared' (SharedPing) for every wheel or trigger+click ping and 'sharedEmote' (SharedEmote) for every wheel or
- * trigger+click emote, never for settings previews.
+ * trigger+click emote, never for settings previews. Emits 'wheelPing' (SharedPing) only for a wheel release by this
+ * user — the one source an explain-style local feature may trust; trigger+click, previews and room members never
+ * produce it.
  */
 export class OverlayManager extends EventEmitter {
   readonly missingAssets = new Set<string>();
@@ -71,6 +73,9 @@ export class OverlayManager extends EventEmitter {
       const displayId = this.displayOf(event.sender);
       if (displayId === undefined) return;
       this.emit('shared', { id: p.id, displayId, x: p.x, y: p.y } satisfies SharedPing);
+      // The wheel's own report: the one local, wheel-sourced ping event. The helper's `click` path and everything
+      // remote emit 'shared' only, so they can never masquerade as a wheel release.
+      this.emit('wheelPing', { id: p.id, displayId, x: p.x, y: p.y } satisfies SharedPing);
       this.unkeepElsewhere(displayId); // the wheel's own overlay already swapped its kept ping for this one
     });
     ipcMain.on(OVERLAY_EMOTED, (event, raw: unknown) => {

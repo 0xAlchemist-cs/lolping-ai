@@ -15,7 +15,10 @@ export default defineConfig({
   preload: {
     build: {
       rollupOptions: {
-        input: { overlay: resolve('src/preload/overlay.ts'), settings: resolve('src/preload/settings.ts'), text: resolve('src/preload/text.ts'), panel: resolve('src/preload/panel.ts') },
+        input: {
+          overlay: resolve('src/preload/overlay.ts'), settings: resolve('src/preload/settings.ts'), text: resolve('src/preload/text.ts'),
+          panel: resolve('src/preload/panel.ts'), explain: resolve('src/preload/explain.ts'),
+        },
         output: { format: 'cjs', entryFileNames: '[name].js' },
       },
     },
@@ -31,6 +34,7 @@ export default defineConfig({
           settings: resolve('src/renderer/settings/index.html'),
           text: resolve('src/renderer/text/index.html'),
           panel: resolve('src/renderer/panel/index.html'),
+          explain: resolve('src/renderer/explain/index.html'),
         },
       },
     },

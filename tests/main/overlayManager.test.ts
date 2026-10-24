@@ -198,6 +198,61 @@ describe('OverlayManager emote reports from the overlay', () => {
   });
 });
 
+describe('OverlayManager wheelPing sourcing', () => {
+  const sender = (i: number): unknown => h.windows[i].webContents;
+
+  it('emits wheelPing beside shared for a wheel report, with the same payload', () => {
+    const shared = vi.fn();
+    const wheel = vi.fn();
+    mgr.on('shared', shared);
+    mgr.on('wheelPing', wheel);
+    h.handlers.get(OVERLAY_PINGED)!({ sender: sender(0) }, { id: 'missing', x: 3, y: 4 });
+    expect(shared).toHaveBeenCalledWith({ id: 'missing', displayId: 1, x: 3, y: 4 });
+    expect(wheel).toHaveBeenCalledWith({ id: 'missing', displayId: 1, x: 3, y: 4 });
+  });
+
+  it('emits neither for a malformed wheel report', () => {
+    const shared = vi.fn();
+    const wheel = vi.fn();
+    mgr.on('shared', shared);
+    mgr.on('wheelPing', wheel);
+    const report = h.handlers.get(OVERLAY_PINGED)!;
+    report({ sender: sender(0) }, { id: 'missing' });
+    report({ sender: sender(0) }, { id: 'made-up', x: 1, y: 1 });
+    report({ sender: {} }, { id: 'missing', x: 1, y: 1 }); // not one of our windows
+    expect(shared).not.toHaveBeenCalled();
+    expect(wheel).not.toHaveBeenCalled();
+  });
+
+  it('never emits wheelPing for a settings preview', () => {
+    const wheel = vi.fn();
+    mgr.on('wheelPing', wheel);
+    mgr.previewPing('missing');
+    expect(wheel).not.toHaveBeenCalled();
+  });
+
+  it('never emits wheelPing for a room member ping', () => {
+    const wheel = vi.fn();
+    mgr.on('wheelPing', wheel);
+    mgr.spawnRemote({ displayId: 1, x: 10, y: 10, id: 'missing', tag: { name: 'friend', color: 0 } });
+    expect(wheel).not.toHaveBeenCalled();
+  });
+
+  it('emits shared but never wheelPing for a trigger+click, even one configured to place missing (R11)', async () => {
+    const { OverlayManager } = await import('../../src/main/overlayManager');
+    const clickMissing = new OverlayManager(overlaySettings({ ...DEFAULT_SETTINGS, clickPingId: 'missing' }), resolveArt);
+    clickMissing.start();
+    const shared = vi.fn();
+    const wheel = vi.fn();
+    clickMissing.on('shared', shared);
+    clickMissing.on('wheelPing', wheel);
+    clickMissing.handle({ type: 'click', x: 50, y: 60, wheel: 'ping' });
+    expect(shared).toHaveBeenCalledOnce();
+    expect(shared).toHaveBeenCalledWith({ id: 'missing', displayId: 1, x: 50, y: 60 });
+    expect(wheel).not.toHaveBeenCalled();
+  });
+});
+
 describe('OverlayManager kept ping', () => {
   const keepOn = () => mgr.updateSettings(overlaySettings({ ...DEFAULT_SETTINGS, keepLastPing: true }));
 
