@@ -580,6 +580,17 @@ describe('feature settings', () => {
     expect(s.features.rooms).toBe(true);
   });
 
+  it('defaults the AI endpoint empty and bounds what a file may carry into it', () => {
+    expect(DEFAULT_SETTINGS.aiBaseUrl).toBe('');
+    expect(DEFAULT_SETTINGS.aiModel).toBe('');
+    expect(normalizeSettings({ aiBaseUrl: '  https://api.example.com/v1/ ', aiModel: ' gpt-4o-mini ' }).aiBaseUrl)
+      .toBe('https://api.example.com/v1/');
+    expect(normalizeSettings({ aiBaseUrl: 'x'.repeat(500) }).aiBaseUrl).toHaveLength(200);
+    expect(normalizeSettings({ aiModel: 42 }).aiModel).toBe('');
+    // The key never has a place here: a file that claims one finds nowhere to put it.
+    expect('aiKey' in normalizeSettings({ aiKey: 'sk-leak' })).toBe(false);
+  });
+
   it('falls back to every feature on when features is not an object', () => {
     for (const raw of ['yes', 1, null, [true]]) expect(normalizeSettings({ features: raw }).features).toEqual(DEFAULT_SETTINGS.features);
     expect(normalizeSettings({ features: { rooms: 1 } }).features.rooms).toBe(true);

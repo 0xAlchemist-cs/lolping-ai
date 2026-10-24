@@ -89,6 +89,10 @@ export interface Settings {
   features: Features;
   /** How room text appears here: a bubble at the spot the sender pointed at, or a line scrolling across the top. */
   roomTextStyle: RoomTextStyle;
+  /** The AI explain endpoint base URL, e.g. https://api.example.com/v1. Empty until the user configures it. The key is never stored here. */
+  aiBaseUrl: string;
+  /** The model name the user chose. Empty until configured. */
+  aiModel: string;
 }
 
 /** Per-machine defaults for the room profile: the OS username and a random tag colour. */
@@ -138,6 +142,8 @@ export const DEFAULT_SETTINGS: Settings = {
   updateNotifiedVersion: null,
   features: { ...DEFAULT_FEATURES },
   roomTextStyle: 'spot',
+  aiBaseUrl: '',
+  aiModel: '',
 };
 
 export const LIMITS = {
@@ -340,6 +346,9 @@ export function normalizeSettings(raw: unknown, platform: Platform = 'win', iden
     updateNotifiedVersion: isVersion(r.updateNotifiedVersion) ? r.updateNotifiedVersion : null,
     features: normalizeFeatures(r.features),
     roomTextStyle: r.roomTextStyle === 'danmaku' ? 'danmaku' : 'spot',
+    // Endpoint shape and model charset are checked where they are used (aiConfig); here we only bound them.
+    aiBaseUrl: typeof r.aiBaseUrl === 'string' ? r.aiBaseUrl.trim().slice(0, 200) : '',
+    aiModel: typeof r.aiModel === 'string' ? r.aiModel.trim().slice(0, 100) : '',
   };
 }
 

@@ -94,6 +94,12 @@ The wheel, from the top going clockwise: Danger, Push, On My Way, All In, Assist
 
 Settings are saved in `%APPDATA%\lolPing\settings.json` on Windows and `~/Library/Application Support/lolPing/settings.json` on a Mac.
 
+## AI explain (experimental)
+
+This fork adds an AI question window. Turn it on under **Settings → Features**, place an Enemy Missing ping with the wheel, and a small card opens where you type a question and the answer streams in. Everything about the ping itself — the wheel, the art, the sound, room sharing — is unchanged, and the feature is off by default.
+
+You bring the service: fill in an **API base URL**, a **model name** and an **API key** of any OpenAI-compatible chat completions endpoint. Your questions and answers go to that service and nowhere else, and usage may cost money on that service’s plan. The key is encrypted with your system’s credential protection (safeStorage; DPAPI on Windows) and stored next to the settings — never in `settings.json`, never shown again, and **Remove key** forgets it. Only HTTPS endpoints are accepted; loopback, private and local addresses are refused.
+
 ## Updates
 
 lolPing checks GitHub for a new version 10 seconds after it starts, then every 6 hours. When there is one, you get a notice on screen, and the tray menu and **Settings → App → About** offer **Update**. It asks first: nothing downloads until you click.

@@ -3,10 +3,11 @@ import {
   QuestionCircle24Regular,
 } from '@fluentui/react-icons';
 import type { ReactNode } from 'react';
-import { FEATURES, type FeatureId } from '../../../shared/features';
+import { featureOn, FEATURES, type FeatureId } from '../../../shared/features';
 import type { Settings } from '../../../shared/settings';
 import { useText } from '../text';
 import type { Update } from '../useAppState';
+import { AiConfigSection } from './AiConfigSection';
 import { SwitchRow } from './rows';
 
 const ICONS: Record<FeatureId, ReactNode> = {
@@ -18,7 +19,7 @@ const ICONS: Record<FeatureId, ReactNode> = {
   aiExplain: <QuestionCircle24Regular />,
 };
 
-/** One switch per optional feature. The room ones grey out while Rooms is off. */
+/** One switch per optional feature. The room ones grey out while Rooms is off; AI explain carries its endpoint card. */
 export function FeaturesSection({ settings: s, update }: { settings: Settings; update: Update }) {
   const t = useText();
   return (
@@ -31,6 +32,7 @@ export function FeaturesSection({ settings: s, update }: { settings: Settings; u
             checked={s.features[id]} onChange={(v) => void update({ features: { ...s.features, [id]: v } })} />
         );
       })}
+      {featureOn(s, 'aiExplain') && <AiConfigSection settings={s} update={update} />}
     </>
   );
 }

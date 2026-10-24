@@ -1,5 +1,6 @@
 import { app, clipboard, dialog, Menu, powerMonitor, screen, shell, systemPreferences } from 'electron';
 import { randomBytes, randomInt } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
 import { readFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -22,8 +23,10 @@ import { resolveTarget, toShared } from './displayNumbers';
 import { EmoteCache } from './emoteCache';
 import { EmoteLibrary, resolveEmoteArt } from './emoteLibrary';
 import { EmoteTransfer } from './emoteTransfer';
-import { simulatedAnswer } from '../shared/explain';
+import { checkEndpoint, guardResolvedAddresses, isExplicitLoopback, validModel, type AiErrorCode } from '../shared/aiConfig';
 import { closeExplainWindow, openExplainWindow, registerExplainWindow } from './explainWindow';
+import { AiError, pingEndpoint, streamChat } from './aiClient';
+import { AiKeyStore } from './aiKeyStore';
 import { isFile } from './fileState';
 import { InputBridge } from './inputBridge';
 import { LanTransport } from './lanTransport';
@@ -336,10 +339,78 @@ function start(): void {
   // report alone, so trigger+click, previews and room members can never open it.
   overlays.on('wheelPing', (p: SharedPing) => {
     if (p.id !== 'missing' || !featureOn(settings, 'aiExplain') || quitting) return;
-    openExplainWindow(screen.getCursorScreenPoint(), text().explainWindow);
+    openExplainWindow(screen.getCursorScreenPoint(), { ...text().explainWindow, errors: text().aiError });
   });
-  // The P1A answer is local and clearly labelled; read at call time so a language change reaches an open card.
-  registerExplainWindow((q) => simulatedAnswer(q, text().explainWindow));
+
+  // P1B: real model answers. One request at a time; the key lives only in the key store and the Authorization header.
+  const aiKeys = new AiKeyStore(settingsDir());
+  let aiHasKey = false;
+  void aiKeys.has().then((has) => {
+    aiHasKey = has;
+  });
+  /** Development builds may point at a local mock server; a packaged build never may. Mirrors LOLPING_RELAYS' rule. */
+  const aiAllowLocal = !app.isPackaged && process.env.LOLPING_AI_ALLOW_LOCALHOST === '1';
+  const aiConfigured = (): boolean =>
+    featureOn(settings, 'aiExplain') && settings.aiBaseUrl.length > 0 && settings.aiModel.length > 0 && aiHasKey;
+  let aiAbort: AbortController | null = null;
+  const aiCancel = (): void => {
+    aiAbort?.abort();
+    aiAbort = null;
+  };
+  /** Everything checked before any bytes leave: endpoint shape, model, key, and the DNS answer for the host. */
+  async function aiPrepare(): Promise<
+    { ok: true; baseUrl: string; model: string; key: string } | { ok: false; code: AiErrorCode }
+  > {
+    const endpoint = checkEndpoint(settings.aiBaseUrl, aiAllowLocal);
+    if (!endpoint.ok) return { ok: false, code: endpoint.code === 'privateAddress' ? 'private' : 'endpoint' };
+    if (!validModel(settings.aiModel)) return { ok: false, code: 'endpoint' };
+    const key = await aiKeys.get();
+    if (!key) return { ok: false, code: 'noKey' };
+    if (!aiAllowLocal || !isExplicitLoopback(endpoint.endpoint.host)) {
+      const guard = await guardResolvedAddresses(endpoint.endpoint.host, async (host) =>
+        lookup(host, { all: true }));
+      if (!guard.ok) return { ok: false, code: guard.code === 'privateAddress' ? 'private' : 'resolve' };
+    }
+    return { ok: true, baseUrl: endpoint.endpoint.url, model: settings.aiModel.trim(), key };
+  }
+  async function aiRun(
+    question: string,
+    maxTokens: number,
+    onDelta: ((t: string) => void) | null,
+  ): Promise<{ ok: true } | { ok: false; code: AiErrorCode }> {
+    const ready = await aiPrepare();
+    if (!ready.ok) return ready;
+    const controller = new AbortController();
+    aiCancel(); // an explicit new request replaces any old one
+    aiAbort = controller;
+    try {
+      await streamChat({
+        baseUrl: ready.baseUrl,
+        model: ready.model,
+        key: ready.key,
+        question,
+        signal: controller.signal,
+        fetchImpl: globalThis.fetch,
+        now: Date.now,
+        maxTokens,
+        onDelta: onDelta ?? (() => undefined),
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, code: err instanceof AiError ? err.code : 'network' };
+    } finally {
+      if (aiAbort === controller) aiAbort = null;
+    }
+  }
+  registerExplainWindow({
+    ask: (question, id, sink) => {
+      void aiRun(question, 1024, (t) => sink({ kind: 'delta', id, text: t }))
+        .then((r) => sink(r.ok ? { kind: 'done', id } : { kind: 'error', id, code: r.code }));
+    },
+    cancel: aiCancel,
+    configured: aiConfigured,
+    openSettings: () => openSettingsWindow('features'),
+  });
   room.on('remoteEmote', (p) => {
     if (featureOn(settings, 'emotes')) overlays.spawnRemoteEmote(p);
   });
@@ -594,7 +665,10 @@ function start(): void {
     }
     if (s.autoUpdateCheck !== previous.autoUpdateCheck) updater?.setAutoCheck(s.autoUpdateCheck);
     // Switching the feature off closes its card: with aiExplain off, no window, no listener effects.
-    if (featureOn(s, 'aiExplain') !== featureOn(previous, 'aiExplain') && !featureOn(s, 'aiExplain')) closeExplainWindow();
+    if (featureOn(s, 'aiExplain') !== featureOn(previous, 'aiExplain') && !featureOn(s, 'aiExplain')) {
+      closeExplainWindow(); // its 'closed' handler cancels the stream too
+      aiCancel();
+    }
     if (s.roomMuted !== previous.roomMuted) {
       syncRoomFlags();
       pushRoom();
@@ -619,6 +693,27 @@ function start(): void {
   registerSettingsIpc({
     store,
     library,
+    ai: {
+      status: () => ({
+        encryptionAvailable: aiKeys.encryptionAvailable(),
+        hasKey: aiHasKey,
+        configured: aiConfigured(),
+      }),
+      setKey: async (raw) => {
+        const r = await aiKeys.set(raw);
+        if (r.ok) aiHasKey = true;
+        return r;
+      },
+      clearKey: async () => {
+        await aiKeys.clear();
+        aiHasKey = false;
+        aiCancel(); // a stream without its key is a stream that should not be running
+      },
+      test: async () => {
+        const r = await aiRun('ping', 1, null);
+        return r.ok ? { ok: true } : { ok: false, code: r.code };
+      },
+    },
     getStatus: status,
     setEnabled,
     preview: (id) => overlays.previewPing(id),

@@ -1,7 +1,7 @@
 import { globalShortcut, ipcMain, shell } from 'electron';
 import { isCustomRef, isEmoteFx, isEmoteRefShape, type CustomEmote, type EmoteRef, type ImportResult, type SoundResult } from '../shared/emotes';
 import type { Strings } from '../shared/i18n';
-import { SETTINGS_CH, type About, type AppStatus, type SetSettingsResult } from '../shared/ipc';
+import { SETTINGS_CH, type About, type AiKeyResult, type AiStatus, type AiTestResult, type AppStatus, type SetSettingsResult } from '../shared/ipc';
 import { hotkeyLabel, hotkeyToAccelerator, type Hotkey } from '../shared/keys';
 import { pingById, type PingId } from '../shared/pings';
 import type { Platform } from '../shared/platform';
@@ -27,6 +27,13 @@ export interface SettingsIpcDeps {
   retryHelper(): void;
   setCapturing(on: boolean): void;
   openAccessibility(): void;
+  /** The AI explain endpoint: status only, plus key writes and a one-token probe. The key never travels back. */
+  ai: {
+    status(): AiStatus;
+    setKey(raw: unknown): Promise<AiKeyResult>;
+    clearKey(): Promise<void>;
+    test(): Promise<AiTestResult>;
+  };
   /** Strings in the app's current language. */
   text(): Strings;
   platform: Platform;
@@ -149,6 +156,11 @@ export function registerSettingsIpc(d: SettingsIpcDeps): void {
   ipcMain.handle(SETTINGS_CH.retryHelper, () => d.retryHelper());
   ipcMain.handle(SETTINGS_CH.capture, (_e, on: unknown) => d.setCapturing(on === true));
   ipcMain.handle(SETTINGS_CH.openAccessibility, () => d.openAccessibility());
+  // The AI key flows one way: in through setKey, out only as a boolean in status. Never read back to any renderer.
+  ipcMain.handle(SETTINGS_CH.aiStatus, () => d.ai.status());
+  ipcMain.handle(SETTINGS_CH.aiKeySet, (_e, raw: unknown) => d.ai.setKey(raw));
+  ipcMain.handle(SETTINGS_CH.aiKeyClear, () => d.ai.clearKey());
+  ipcMain.handle(SETTINGS_CH.aiTest, () => d.ai.test());
   ipcMain.handle(SETTINGS_CH.roomGet, () => d.room.state());
   ipcMain.handle(SETTINGS_CH.roomCreate, () => d.room.create());
   ipcMain.handle(SETTINGS_CH.roomJoin, (_e, text: unknown): Promise<JoinResult> | JoinResult =>

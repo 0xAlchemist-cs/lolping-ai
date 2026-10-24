@@ -15,12 +15,22 @@
     <form id="ask">
       <input id="question" type="text" autocomplete="off" spellcheck="false" maxlength="200" />
       <button id="send" type="submit">Ask</button>
+      <button id="stop" type="button" hidden>Stop</button>
     </form>
     <p id="hint" class="hint"></p>
+    <section id="setup" class="setup" hidden>
+      <p id="setupTitle" class="setupTitle"></p>
+      <p id="setupHint" class="setupHint"></p>
+      <button id="openSettings" type="button"></button>
+    </section>
     <article id="answer" class="answer" hidden>
-      <span id="badge" class="badge"></span>
       <div id="body"></div>
     </article>
+    <section id="failure" class="failure" hidden>
+      <p id="failureTitle" class="failureTitle"></p>
+      <p id="failureText" class="failureText"></p>
+      <button id="retry" type="button"></button>
+    </section>
     <footer>
       <button id="copy" type="button" disabled>Copy</button>
       <span id="copied"></span>

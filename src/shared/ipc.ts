@@ -1,3 +1,4 @@
+import type { AiErrorCode } from './aiConfig';
 import type { EmoteArt, EmoteFile, EmoteRef, ImportResult, SoundResult } from './emotes';
 import type { Lang } from './i18n';
 import type { PingId } from './pings';
@@ -75,26 +76,56 @@ export interface TextApi {
 
 export const PANEL_CH = { state: 'panel:state', action: 'panel:action' } as const;
 
-export const EXPLAIN_CH = { ask: 'explain:ask', strings: 'explain:strings', close: 'explain:close' } as const;
+export const EXPLAIN_CH = {
+  ask: 'explain:ask', stop: 'explain:stop', strings: 'explain:strings', close: 'explain:close', openSettings: 'explain:openSettings',
+  event: 'explain:event', state: 'explain:state',
+} as const;
 
 /** The explain window's words, in the language the app uses. */
 export interface ExplainText {
   title: string;
   placeholder: string;
-  hint: string;
-  simulatedLabel: string;
   ask: string;
+  stop: string;
+  retry: string;
   copy: string;
   copied: string;
+  copyFailed: string;
   close: string;
   empty: string;
+  unconfigured: string;
+  unconfiguredHint: string;
+  openSettings: string;
+  generating: string;
+  errorTitle: string;
+  /** Why a request failed, by code, in the app language. */
+  errors: Partial<Record<AiErrorCode, string>>;
 }
 
-/** window.explainApi in the explain renderer. `ask` resolves with the simulated answer, or null when rejected. */
+/** One push from the main process to the explain window. `id` orders the stream; the page ignores a stale id. */
+export type ExplainEvent =
+  | { kind: 'delta'; id: number; text: string }
+  | { kind: 'done'; id: number }
+  | { kind: 'error'; id: number; code: AiErrorCode };
+
+/** `configured` is false until endpoint, model and a saved key all exist; the page shows the setup hint then. */
+export interface ExplainState {
+  configured: boolean;
+}
+
+/**
+ * window.explainApi in the explain renderer. `ask` only submits — the answer arrives as `event` pushes, so the page
+ * streams and a slow request never blocks an IPC round-trip.
+ */
 export interface ExplainApi {
-  ask(question: string): Promise<string | null>;
+  ask(question: string): Promise<number | null>;
+  stop(): void;
   strings(): Promise<ExplainText | null>;
+  state(): Promise<ExplainState | null>;
   close(): void;
+  openSettings(): void;
+  /** Streams answer events into the page; returns the way to stop listening. */
+  on(cb: (ev: ExplainEvent) => void): () => void;
 }
 
 /** Everything a panel window draws. The roster and the vote widget get the same shape, so one message feeds either. */
@@ -174,6 +205,17 @@ export interface About {
   limitations: string[];
 }
 
+/** What the settings page may learn about the AI key: presence and health, never the secret. */
+export interface AiStatus {
+  encryptionAvailable: boolean;
+  hasKey: boolean;
+  /** Endpoint, model and key are all in place, so the explain window can really ask. */
+  configured: boolean;
+}
+
+export type AiKeyResult = { ok: true } | { ok: false; code: 'noEncryption' | 'badKey' };
+export type AiTestResult = { ok: true } | { ok: false; code: AiErrorCode };
+
 export type SetSettingsResult = { ok: true; settings: Settings } | { ok: false; error: string; settings: Settings };
 
 // SETTINGS_CH lives in its own module so the settings preload can import it without sharing a chunk
@@ -196,6 +238,14 @@ export interface SettingsApi {
   importEmote(file: EmoteFile): Promise<ImportResult>;
   /** Deletes an imported emote's files and entry; wheel slots that used it fall back. */
   removeEmote(id: EmoteRef): Promise<void>;
+  /** Whether the AI key store holds a usable key and encryption works; never the key itself. */
+  getAiStatus(): Promise<AiStatus>;
+  /** Stores a new API key encrypted; it is never read back. */
+  setAiKey(key: string): Promise<AiKeyResult>;
+  /** Forgets the saved API key. */
+  clearAiKey(): Promise<void>;
+  /** Fires a one-token request at the configured service and reports how it went. */
+  testAiConnection(): Promise<AiTestResult>;
   /** Gives one of our imported emotes a sound (OGG, MP3 or WAV bytes), or takes it away with null. */
   setEmoteSound(id: EmoteRef, sound: Uint8Array | null): Promise<SoundResult>;
   /** Stores which signature effect the emote plays; undefined puts it back to the plain pop. */
