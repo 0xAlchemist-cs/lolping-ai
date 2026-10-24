@@ -4,6 +4,8 @@
   English | <a href="README.zh-CN.md">简体中文</a>
 </p>
 
+> **Fork notice** — this repository imports [darrenprx/lolPing](https://github.com/darrenprx/lolPing) v0.5.3 (upstream `main` @ [`efa3fe6`](https://github.com/darrenprx/lolPing/commit/efa3fe631863a9f89c924110b50c3766234dd0b9)), MIT licensed — see [LICENSE](LICENSE). All credit for lolPing itself goes to the upstream author. This fork adds an experimental AI-explain feature for the Enemy Missing ping; the phase-0 architecture audit lives on branch [`audit/phase-0`](../../tree/audit/phase-0).
+
 <p align="center">
   League of Legends pings and emotes for your whole desktop, on Windows and macOS.<br>
   Hold <b>Alt</b> (<b>⌥ Option</b> on a Mac), drag, and let go on a ping. The animation pops and the sound plays on top of any app, on any monitor.<br>

@@ -4,6 +4,8 @@
   <a href="README.md">English</a> | 简体中文
 </p>
 
+> **来源声明** — 本仓库导入自 [darrenprx/lolPing](https://github.com/darrenprx/lolPing) v0.5.3（上游 `main` @ [`efa3fe6`](https://github.com/darrenprx/lolPing/commit/efa3fe631863a9f89c924110b50c3766234dd0b9)），遵循 MIT 协议，见 [LICENSE](LICENSE)。lolPing 本体的全部功劳归属于上游作者。本仓库为其派生项目，计划为「敌人消失」信号增加可关闭的 AI 解释功能；阶段 0 架构审计见 [`audit/phase-0`](../../tree/audit/phase-0) 分支。
+
 <p align="center">
   把英雄联盟的信号和表情搬到整个桌面，支持 Windows、macOS，以及实验性的 Linux X11 版本。<br>
   按住 <b>Alt</b>（Mac 上是 <b>⌥ Option</b>）拖动，在想要的信号上松开：动画弹出、音效响起，任何程序之上、任何显示器上都可以。<br>
