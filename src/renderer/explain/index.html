@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+  <title>lolPing explain</title>
+  <link rel="stylesheet" href="explain.css" />
+</head>
+<body>
+  <main class="card">
+    <header>
+      <h1 id="title">Ask about this</h1>
+      <button id="close" type="button" aria-label="Close">✕</button>
+    </header>
+    <form id="ask">
+      <input id="question" type="text" autocomplete="off" spellcheck="false" maxlength="200" />
+      <button id="send" type="submit">Ask</button>
+    </form>
+    <p id="hint" class="hint"></p>
+    <article id="answer" class="answer" hidden>
+      <span id="badge" class="badge"></span>
+      <div id="body"></div>
+    </article>
+    <footer>
+      <button id="copy" type="button" disabled>Copy</button>
+      <span id="copied"></span>
+    </footer>
+  </main>
+  <script type="module" src="main.ts"></script>
+</body>
+</html>

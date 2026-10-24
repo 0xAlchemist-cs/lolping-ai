@@ -1,5 +1,6 @@
 import {
   Chat24Regular, CheckboxChecked24Regular, Emoji24Regular, PeopleCommunity24Regular, People24Regular,
+  QuestionCircle24Regular,
 } from '@fluentui/react-icons';
 import type { ReactNode } from 'react';
 import { FEATURES, type FeatureId } from '../../../shared/features';
@@ -14,6 +15,7 @@ const ICONS: Record<FeatureId, ReactNode> = {
   roomText: <Chat24Regular />,
   roomVotes: <CheckboxChecked24Regular />,
   roomPanel: <People24Regular />,
+  aiExplain: <QuestionCircle24Regular />,
 };
 
 /** One switch per optional feature. The room ones grey out while Rooms is off. */

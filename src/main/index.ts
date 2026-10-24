@@ -22,6 +22,8 @@ import { resolveTarget, toShared } from './displayNumbers';
 import { EmoteCache } from './emoteCache';
 import { EmoteLibrary, resolveEmoteArt } from './emoteLibrary';
 import { EmoteTransfer } from './emoteTransfer';
+import { simulatedAnswer } from '../shared/explain';
+import { closeExplainWindow, openExplainWindow, registerExplainWindow } from './explainWindow';
 import { isFile } from './fileState';
 import { InputBridge } from './inputBridge';
 import { LanTransport } from './lanTransport';
@@ -330,6 +332,14 @@ function start(): void {
     const shared = toShared(overlays.numbered(), p.displayId, p.x, p.y);
     if (shared) room.sendPing(p.id, shared);
   });
+  // The explain window opens only on the wheel's own Enemy Missing release: wheelPing comes from the overlay's
+  // report alone, so trigger+click, previews and room members can never open it.
+  overlays.on('wheelPing', (p: SharedPing) => {
+    if (p.id !== 'missing' || !featureOn(settings, 'aiExplain') || quitting) return;
+    openExplainWindow(screen.getCursorScreenPoint(), text().explainWindow);
+  });
+  // The P1A answer is local and clearly labelled; read at call time so a language change reaches an open card.
+  registerExplainWindow((q) => simulatedAnswer(q, text().explainWindow));
   room.on('remoteEmote', (p) => {
     if (featureOn(settings, 'emotes')) overlays.spawnRemoteEmote(p);
   });
@@ -583,6 +593,8 @@ function start(): void {
       tray.setRoomsShown(featureOn(s, 'rooms'));
     }
     if (s.autoUpdateCheck !== previous.autoUpdateCheck) updater?.setAutoCheck(s.autoUpdateCheck);
+    // Switching the feature off closes its card: with aiExplain off, no window, no listener effects.
+    if (featureOn(s, 'aiExplain') !== featureOn(previous, 'aiExplain') && !featureOn(s, 'aiExplain')) closeExplainWindow();
     if (s.roomMuted !== previous.roomMuted) {
       syncRoomFlags();
       pushRoom();
@@ -678,6 +690,7 @@ function start(): void {
     tray.destroy();
     panels.destroy();
     overlays.destroy();
+    closeExplainWindow();
     void Promise.allSettled([bridge.stop(), store.flush(), lan.whenClosed(), relay.whenClosed()]).then(() => app.exit(0));
   });
 }

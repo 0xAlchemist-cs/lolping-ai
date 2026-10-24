@@ -75,6 +75,28 @@ export interface TextApi {
 
 export const PANEL_CH = { state: 'panel:state', action: 'panel:action' } as const;
 
+export const EXPLAIN_CH = { ask: 'explain:ask', strings: 'explain:strings', close: 'explain:close' } as const;
+
+/** The explain window's words, in the language the app uses. */
+export interface ExplainText {
+  title: string;
+  placeholder: string;
+  hint: string;
+  simulatedLabel: string;
+  ask: string;
+  copy: string;
+  copied: string;
+  close: string;
+  empty: string;
+}
+
+/** window.explainApi in the explain renderer. `ask` resolves with the simulated answer, or null when rejected. */
+export interface ExplainApi {
+  ask(question: string): Promise<string | null>;
+  strings(): Promise<ExplainText | null>;
+  close(): void;
+}
+
 /** Everything a panel window draws. The roster and the vote widget get the same shape, so one message feeds either. */
 export interface PanelState {
   view: 'roster' | 'vote';
