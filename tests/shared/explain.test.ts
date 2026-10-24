@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_QUESTION, parseQuestion, simulatedAnswer } from '../../src/shared/explain';
-import { strings } from '../../src/shared/i18n';
+import { MAX_QUESTION, parseQuestion } from '../../src/shared/explain';
 
 describe('parseQuestion', () => {
   it('accepts a plain question and trims it', () => {
@@ -28,17 +27,5 @@ describe('parseQuestion', () => {
     const q = parseQuestion(long) ?? '';
     expect([...q]).toHaveLength(MAX_QUESTION);
     expect([...q].every((ch) => ch === '🧿')).toBe(true);
-  });
-});
-
-describe('simulatedAnswer', () => {
-  it('carries the simulated label and the no-model hint in both languages, and echoes the question', () => {
-    for (const lang of ['en', 'zh-CN'] as const) {
-      const words = strings(lang).explainWindow;
-      const answer = simulatedAnswer('why is this code slow?', words);
-      expect(answer).toContain(words.simulatedLabel);
-      expect(answer).toContain(words.hint);
-      expect(answer).toContain('why is this code slow?');
-    }
   });
 });

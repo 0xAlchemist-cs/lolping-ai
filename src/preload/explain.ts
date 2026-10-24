@@ -1,11 +1,27 @@
-import { contextBridge, ipcRenderer } from 'electron';
-import type { ExplainApi } from '../shared/ipc';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { ExplainApi, ExplainEvent } from '../shared/ipc';
+
+// Inlined rather than imported: importing EXPLAIN_CH by value from ../shared/ipc makes a second
+// preload entry consume that module (overlay.ts is the first), so rollup emits a shared chunk —
+// and a sandboxed preload cannot require a generated sibling chunk. Kept in sync by test.
+const EXPLAIN_CH = {
+  ask: 'explain:ask', stop: 'explain:stop', strings: 'explain:strings', close: 'explain:close', openSettings: 'explain:openSettings',
+  event: 'explain:event', state: 'explain:state',
+} as const;
 
 const api: ExplainApi = {
   // Inlined: a sandboxed preload can require electron, but not a generated sibling chunk.
-  ask: (question) => ipcRenderer.invoke('explain:ask', question),
-  strings: () => ipcRenderer.invoke('explain:strings'),
-  close: () => ipcRenderer.send('explain:close'),
+  ask: (question) => ipcRenderer.invoke(EXPLAIN_CH.ask, question),
+  stop: () => ipcRenderer.send(EXPLAIN_CH.stop),
+  strings: () => ipcRenderer.invoke(EXPLAIN_CH.strings),
+  state: () => ipcRenderer.invoke(EXPLAIN_CH.state),
+  close: () => ipcRenderer.send(EXPLAIN_CH.close),
+  openSettings: () => ipcRenderer.send(EXPLAIN_CH.openSettings),
+  on: (cb) => {
+    const handler = (_e: IpcRendererEvent, ev: ExplainEvent) => cb(ev);
+    ipcRenderer.on(EXPLAIN_CH.event, handler);
+    return () => ipcRenderer.removeListener(EXPLAIN_CH.event, handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('explainApi', api);

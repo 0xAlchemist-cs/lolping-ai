@@ -33,4 +33,8 @@ export const SETTINGS_CH = {
   updateStart: 'update:start',
   updateOpenRelease: 'update:openRelease',
   showSection: 'settings:showSection',
+  aiStatus: 'ai:status',
+  aiKeySet: 'ai:keySet',
+  aiKeyClear: 'ai:keyClear',
+  aiTest: 'ai:test',
 } as const;

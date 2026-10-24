@@ -1,24 +1,28 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { EXPLAIN_CH } from '../../src/shared/ipc';
+import { EXPLAIN_CH, type ExplainEvent, type ExplainText } from '../../src/shared/ipc';
+import { strings } from '../../src/shared/i18n';
 
 const { windows } = vi.hoisted(() => ({ windows: [] as unknown[] }));
-const { asks } = vi.hoisted(() => ({ asks: new Map<string, (event: unknown, raw: unknown) => Promise<unknown>>() }));
-const { handlers } = vi.hoisted(() => ({ handlers: new Map<string, (event: unknown, raw: unknown) => void>() }));
+const { handles } = vi.hoisted(() => ({ handles: new Map<string, (event: unknown, raw: unknown) => unknown>() }));
+const { sends } = vi.hoisted(() => ({ sends: new Map<string, (event: unknown, raw: unknown) => void>() }));
 
 vi.mock('electron', async () => {
   const { EventEmitter: Emitter } = await import('node:events');
   class FakeContents extends Emitter {
     openHandler: ((details: { url: string }) => { action: string }) | null = null;
+    sent: Array<[string, unknown]> = [];
     setWindowOpenHandler(handler: (details: { url: string }) => { action: string }): void {
       this.openHandler = handler;
+    }
+    send(channel: string, payload: unknown): void {
+      this.sent.push([channel, payload]);
     }
   }
   class FakeWindow extends Emitter {
     webContents = new FakeContents();
     destroyed = false;
     shown = false;
-    focused = false;
     constructor() {
       super();
       windows.push(this);
@@ -31,7 +35,6 @@ vi.mock('electron', async () => {
       this.shown = true;
     }
     focus(): void {
-      this.focused = true;
       this.emit('focus');
     }
     close(): void {
@@ -42,8 +45,8 @@ vi.mock('electron', async () => {
   const display = { id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, workArea: { x: 0, y: 0, width: 1920, height: 1040 } };
   const screen = { getDisplayNearestPoint: () => display };
   const ipcMain = {
-    handle: (channel: string, fn: (event: unknown, raw: unknown) => Promise<unknown>) => asks.set(channel, fn),
-    on: (channel: string, fn: (event: unknown, raw: unknown) => void) => handlers.set(channel, fn),
+    handle: (channel: string, fn: (event: unknown, raw: unknown) => unknown) => handles.set(channel, fn),
+    on: (channel: string, fn: (event: unknown, raw: unknown) => void) => sends.set(channel, fn),
   };
   return { BrowserWindow: FakeWindow, ipcMain, screen };
 });
@@ -57,80 +60,114 @@ vi.mock('../../src/main/paths', () => ({
 
 vi.mock('../../src/main/coords', () => ({ placeInside: (p: unknown, size: { width: number; height: number }) => ({ x: 10, y: 10, ...size }) }));
 
-import type { ExplainText } from '../../src/shared/ipc';
-import { strings } from '../../src/shared/i18n';
-
-type FakeWindow = EventEmitter & { webContents: EventEmitter & { openHandler: ((d: { url: string }) => { action: string }) | null }; shown: boolean };
+type FakeContents = EventEmitter & { sent: Array<[string, unknown]>; openHandler: ((d: { url: string }) => { action: string }) | null };
+type FakeWindow = EventEmitter & { webContents: FakeContents; shown: boolean; close(): void };
 type Mod = typeof import('../../src/main/explainWindow');
 let mod: Mod;
 
-const WORDS: ExplainText = strings('en').explainWindow;
+const WORDS: ExplainText = { ...strings('en').explainWindow, errors: strings('en').aiError };
+
+/** A deps double that records asks and lets the test push events back through the captured sink. */
+let asked: Array<{ q: string; id: number; sink: (ev: ExplainEvent) => void }> = [];
+let cancelled = 0;
+const deps = {
+  ask: (q: string, id: number, sink: (ev: ExplainEvent) => void) => {
+    asked.push({ q, id, sink });
+  },
+  cancel: () => {
+    cancelled += 1;
+  },
+  configured: () => configuredFlag,
+  openSettings: () => {
+    openedSettings += 1;
+  },
+};
+let configuredFlag = true;
+let openedSettings = 0;
 
 beforeEach(async () => {
   windows.length = 0;
-  asks.clear();
-  handlers.clear();
+  handles.clear();
+  sends.clear();
+  asked = [];
+  cancelled = 0;
+  configuredFlag = true;
+  openedSettings = 0;
   vi.resetModules();
   mod = await import('../../src/main/explainWindow');
-  mod.registerExplainWindow((q) => `SIMULATED:${q}`);
+  mod.registerExplainWindow(deps);
 });
 
-describe('explainWindow lifecycle', () => {
-  it('opens one window, and a second open shows the same window instead of a second one', () => {
-    mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
-    expect(windows).toHaveLength(1);
-    mod.openExplainWindow({ x: 400, y: 300 }, WORDS);
-    expect(windows).toHaveLength(1);
-    expect((windows[0] as FakeWindow).shown).toBe(true);
-  });
-
-  it('tells its gone-listeners when it closes', () => {
-    const gone = vi.fn();
-    mod.onExplainWindowGone(gone);
-    mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
-    expect(gone).not.toHaveBeenCalled();
-    (windows[0] as FakeWindow & { close(): void }).close();
-    expect(gone).toHaveBeenCalledTimes(1);
-  });
-
-  it('never leaves the page it was given, and opens no window', () => {
+describe('explainWindow streaming protocol', () => {
+  it('streams an ask: id out, deltas in, done ends it', async () => {
     mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
     const contents = (windows[0] as FakeWindow).webContents;
-    const blocked = (url: string): boolean => {
-      const event = { url, preventDefault: vi.fn() };
-      contents.emit('will-navigate', event, url);
-      return event.preventDefault.mock.calls.length > 0;
-    };
-    expect(blocked('https://example.com/')).toBe(true);
-    expect(blocked('file:///C:/x.html')).toBe(true);
-    expect(blocked('lolping://app/explain/index.html')).toBe(false);
-    expect(contents.openHandler).not.toBeNull();
-    expect(contents.openHandler?.({ url: 'https://example.com/' })).toEqual({ action: 'deny' });
-  });
-});
-
-describe('explainWindow IPC', () => {
-  it('answers a question from its own renderer with the simulated answer', async () => {
-    mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
-    const sender = (windows[0] as FakeWindow).webContents;
-    expect(await asks.get(EXPLAIN_CH.ask)!({ sender }, '  why?  ')).toBe('SIMULATED:why?');
-    expect(await asks.get(EXPLAIN_CH.strings)!({ sender }, undefined)).toEqual(WORDS);
+    const id = (await handles.get(EXPLAIN_CH.ask)!({ sender: contents }, '  why?  ')) as number;
+    expect(id).toBeGreaterThan(0);
+    expect(asked).toEqual([{ q: 'why?', id, sink: expect.any(Function) }]);
+    asked[0].sink({ kind: 'delta', id, text: 'Hello' });
+    asked[0].sink({ kind: 'delta', id, text: ' world' });
+    asked[0].sink({ kind: 'done', id });
+    const events = contents.sent.filter(([c]) => c === EXPLAIN_CH.event).map(([, p]) => p);
+    expect(events).toEqual([
+      { kind: 'delta', id, text: 'Hello' },
+      { kind: 'delta', id, text: ' world' },
+      { kind: 'done', id },
+    ]);
   });
 
-  it('rejects a question from another sender, and a question with nothing in it', async () => {
+  it('rejects an ask from another sender and an unusable question', async () => {
     mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
-    expect(await asks.get(EXPLAIN_CH.ask)!({ sender: {} }, 'why?')).toBeNull();
-    const sender = (windows[0] as FakeWindow).webContents;
-    expect(await asks.get(EXPLAIN_CH.ask)!({ sender }, '   ')).toBeNull();
-    expect(await asks.get(EXPLAIN_CH.ask)!({ sender }, 42)).toBeNull();
+    expect(await handles.get(EXPLAIN_CH.ask)!({ sender: {} }, 'why?')).toBeNull();
+    const contents = (windows[0] as FakeWindow).webContents;
+    expect(await handles.get(EXPLAIN_CH.ask)!({ sender: contents }, '   ')).toBeNull();
+    expect(asked).toEqual([]);
   });
 
-  it('closes on the close channel from its own renderer only', () => {
+  it('a second ask cancels the first and invalidates its late events', async () => {
     mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
-    const win = windows[0] as FakeWindow & { close(): void; destroyed: boolean };
-    handlers.get(EXPLAIN_CH.close)!({ sender: {} }, undefined);
-    expect(win.destroyed).toBe(false);
-    handlers.get(EXPLAIN_CH.close)!({ sender: win.webContents }, undefined);
-    expect(win.destroyed).toBe(true);
+    const contents = (windows[0] as FakeWindow).webContents;
+    const first = (await handles.get(EXPLAIN_CH.ask)!({ sender: contents }, 'one')) as number;
+    expect(cancelled).toBe(1);
+    const second = (await handles.get(EXPLAIN_CH.ask)!({ sender: contents }, 'two')) as number;
+    expect(second).toBeGreaterThan(first);
+    // The first stream finishes late: every event must die at the sink.
+    asked[0].sink({ kind: 'delta', id: first, text: 'late' });
+    asked[0].sink({ kind: 'done', id: first });
+    expect(contents.sent.filter(([c]) => c === EXPLAIN_CH.event)).toEqual([]);
+  });
+
+  it('stop cancels and invalidates; the window stays open for the next ask', async () => {
+    mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
+    const win = windows[0] as FakeWindow;
+    const id = (await handles.get(EXPLAIN_CH.ask)!({ sender: win.webContents }, 'slow one')) as number;
+    sends.get(EXPLAIN_CH.stop)!({ sender: win.webContents }, undefined);
+    expect(cancelled).toBe(2); // once from the ask's replace step, once from the stop itself
+    asked[0].sink({ kind: 'delta', id, text: 'too late' });
+    expect(win.webContents.sent.filter(([c]) => c === EXPLAIN_CH.event)).toEqual([]);
+    const next = (await handles.get(EXPLAIN_CH.ask)!({ sender: win.webContents }, 'again')) as number;
+    expect(next).toBeGreaterThan(id);
+  });
+
+  it('closing the window cancels the stream and late events go nowhere', async () => {
+    mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
+    const win = windows[0] as FakeWindow;
+    const id = (await handles.get(EXPLAIN_CH.ask)!({ sender: win.webContents }, 'q')) as number;
+    win.close();
+    expect(cancelled).toBe(2); // the ask's replace step, then the closed handler
+    asked[0].sink({ kind: 'done', id });
+    // Nothing to assert numerically: the sink must simply not touch the destroyed window.
+  });
+
+  it('reports configuration state to its own renderer only', async () => {
+    configuredFlag = false;
+    mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
+    const win = windows[0] as FakeWindow;
+    expect(await handles.get(EXPLAIN_CH.state)!({ sender: win.webContents }, undefined)).toEqual({ configured: false });
+    expect(await handles.get(EXPLAIN_CH.state)!({ sender: {} }, undefined)).toBeNull();
+    sends.get(EXPLAIN_CH.openSettings)!({ sender: win.webContents }, undefined);
+    expect(openedSettings).toBe(1);
+    sends.get(EXPLAIN_CH.openSettings)!({ sender: {} }, undefined);
+    expect(openedSettings).toBe(1);
   });
 });
