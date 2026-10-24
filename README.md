@@ -4,7 +4,7 @@
   English | <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-> **Fork notice** — this repository imports [darrenprx/lolPing](https://github.com/darrenprx/lolPing) v0.5.3 (upstream `main` @ [`efa3fe6`](https://github.com/darrenprx/lolPing/commit/efa3fe631863a9f89c924110b50c3766234dd0b9)), MIT licensed — see [LICENSE](LICENSE). All credit for lolPing itself goes to the upstream author. This fork adds an experimental AI-explain feature for the Enemy Missing ping; the phase-0 architecture audit lives on branch [`audit/phase-0`](../../tree/audit/phase-0).
+> **Fork notice** — this repository is a source snapshot **import** (not a GitHub-native fork) of [darrenprx/lolPing](https://github.com/darrenprx/lolPing) v0.5.3 (upstream `main` @ [`efa3fe6`](https://github.com/darrenprx/lolPing/commit/efa3fe631863a9f89c924110b50c3766234dd0b9)), MIT licensed — see [LICENSE](LICENSE). All credit for lolPing itself goes to the upstream author. This fork plans an **experimental, off-by-default AI-explain feature for the Enemy Missing ping; it is not implemented yet** — only the phase-0 architecture audit exists so far, on branch [`audit/phase-0`](../../tree/audit/phase-0). Until then this repo behaves exactly like upstream lolPing.
 
 <p align="center">
   League of Legends pings and emotes for your whole desktop, on Windows and macOS.<br>
