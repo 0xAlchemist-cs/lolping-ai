@@ -98,6 +98,7 @@ describe('preload sandbox bundle safety', () => {
     const { exposed, calls } = loadSandboxBundle('explain');
     const api = exposed.explainApi as {
       capture: (sessionId: number) => Promise<unknown>;
+      askVision: (request: unknown) => Promise<unknown>;
       closePreview: (sessionId: number) => void;
       onVisionSession: (cb: (id: number) => void) => () => void;
     };
@@ -114,5 +115,8 @@ describe('preload sandbox bundle safety', () => {
     expect(calls[0].args).toEqual([7]);
     expect(calls[1].args).toEqual([7]);
     expect(calls[2].args[0]).toBe(calls[3].args[0]);
+    const consent = { sessionId: 7, snapshotId: 9, scope: 'local', question: 'why?', confirmed: true };
+    await api.askVision(consent);
+    expect(calls[4]).toEqual({ method: 'invoke', channel: EXPLAIN_CH.askVision, args: [consent] });
   });
 });

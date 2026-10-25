@@ -1,6 +1,7 @@
 import { MAX_QUESTION } from '../../shared/explain';
 import type { AiErrorCode } from '../../shared/aiConfig';
-import type { ExplainText } from '../../shared/ipc';
+import type { ExplainEvent, ExplainText } from '../../shared/ipc';
+import type { VisionAsk } from '../../shared/vision';
 import { VisionPreview } from './visionPreview';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -23,6 +24,7 @@ const failureText = $('failureText');
 const retry = $('retry') as HTMLButtonElement;
 const copy = $('copy') as HTMLButtonElement;
 const copied = $('copied');
+const emptyState = $('emptyState');
 const vision = new VisionPreview(window.explainApi, {
   open: $<HTMLButtonElement>('previewOpen'), close: $<HTMLButtonElement>('previewClose'),
   text: $('textView'), preview: $('visionView'), privacy: $('visionPrivacy'), timing: $('visionTiming'),
@@ -30,9 +32,13 @@ const vision = new VisionPreview(window.explainApi, {
   local: $<HTMLImageElement>('visionLocal'), full: $<HTMLImageElement>('visionFull'),
   localCaption: $('visionLocalCaption'), fullCaption: $('visionFullCaption'),
   localMarker: $('visionLocalMarker'), fullMarker: $('visionFullMarker'),
-});
-const stopVisionSession = window.explainApi.onVisionSession((sessionId) => vision.setSession(sessionId));
+  includeFull: $<HTMLInputElement>('visionIncludeFull'), includeFullLabel: $('visionIncludeFullLabel'),
+  selection: $('visionSelection'), destination: $('visionDestination'), uploadPrivacy: $('visionUploadPrivacy'),
+  question: $<HTMLInputElement>('visionQuestion'), send: $<HTMLButtonElement>('visionSend'),
+}, (request) => { void askRequest(request.question, request); });
+const stopVisionSession = window.explainApi.onVisionSession(setSession);
 window.addEventListener('beforeunload', () => {
+  invalidate();
   stopVisionSession();
   vision.destroy();
 });
@@ -41,6 +47,12 @@ let words: ExplainText | null = null;
 let lastId: number | null = null;
 let latestAnswer = '';
 let lastQuestion = '';
+let lastMode: 'text' | 'vision' = 'text';
+let sessionId = 0;
+let epoch = 0;
+let awaitingId = false;
+type Terminal = Extract<ExplainEvent, { kind: 'done' | 'error' }>;
+const early = new Map<number, { text: string; terminal: Terminal | null }>();
 
 /** The states the card can be in; every transition goes through setState so the buttons stay consistent. */
 type State = 'idle' | 'unconfigured' | 'generating' | 'done' | 'error';
@@ -60,9 +72,18 @@ function showHint(message: string, warn: boolean): void {
 function setState(next: State): void {
   state = next;
   send.disabled = next === 'generating';
+  vision.setBusy(next === 'generating');
   stopBtn.hidden = next !== 'generating';
   setup.hidden = next !== 'unconfigured';
   failure.hidden = next !== 'error';
+  emptyState.hidden = next !== 'idle' || latestAnswer.length > 0;
+  updateModeLabel();
+}
+
+function updateModeLabel(): void {
+  $('textModeLabel').textContent = !words ? ''
+    : lastMode === 'vision'
+      ? words.visionModeLabel : words.textModeLabel;
 }
 
 /** Failure text in the page's own words; the code alone when a translation is missing. */
@@ -71,13 +92,55 @@ function errorText(code: AiErrorCode): string {
 }
 
 async function ask(): Promise<void> {
-  if (!words) return;
+  if (!words || state === 'generating') return;
   const q = question.value.trim();
   if (!q) {
     showHint(words.empty, true);
     return;
   }
+  await askRequest(q);
+}
+
+function invalidate(): void {
+  epoch += 1;
+  lastId = null;
+  awaitingId = false;
+  early.clear();
+}
+
+function setSession(next: number): void {
+  if (!Number.isSafeInteger(next) || next <= sessionId) return;
+  sessionId = next;
+  vision.setSession(next);
+  if (lastMode === 'vision') {
+    invalidate();
+    lastMode = 'text';
+    latestAnswer = '';
+    body.textContent = '';
+    answer.hidden = true;
+    copy.disabled = true;
+    showHint('', false);
+    setState('idle');
+  }
+}
+
+function fail(code: AiErrorCode): void {
+  lastId = null;
+  awaitingId = false;
+  early.clear();
+  showHint('', false);
+  failureTitle.textContent = words?.errorTitle ?? '';
+  failureText.textContent = errorText(code);
+  copy.disabled = latestAnswer.length === 0;
+  setState('error');
+}
+
+async function askRequest(q: string, screenshot?: VisionAsk): Promise<void> {
+  if (!words || state === 'generating') return;
+  invalidate();
+  const requestEpoch = epoch;
   lastQuestion = q;
+  lastMode = screenshot ? 'vision' : 'text';
   latestAnswer = '';
   body.textContent = '';
   answer.hidden = false; // the answer area is the stream's stage from the first token on
@@ -86,19 +149,22 @@ async function ask(): Promise<void> {
   copied.classList.remove('warn');
   setState('generating');
   showHint(words.generating, false);
-  let id: number | null = null;
+  awaitingId = true;
   try {
-    id = await window.explainApi.ask(q);
-  } finally {
-    // P1A left the button stuck when the call threw; whatever happened, the card must stay usable.
-    send.disabled = false;
+    const reply = screenshot ? await window.explainApi.askVision(screenshot) : await window.explainApi.ask(q);
+    if (epoch !== requestEpoch) return;
+    awaitingId = false;
+    if (reply === null) { fail('badResponse'); return; }
+    if (typeof reply !== 'number' && !reply.ok) { fail(reply.code); return; }
+    const id = typeof reply === 'number' ? reply : reply.id;
+    lastId = id;
+    const buffered = early.get(id);
+    early.clear();
+    if (buffered?.text) receive({ kind: 'delta', id, text: buffered.text });
+    if (buffered?.terminal) receive(buffered.terminal);
+  } catch {
+    if (epoch === requestEpoch) fail('network');
   }
-  if (id === null) {
-    setState('idle');
-    showHint(words.empty, true);
-    return;
-  }
-  lastId = id;
 }
 
 form.addEventListener('submit', (event) => {
@@ -108,13 +174,23 @@ form.addEventListener('submit', (event) => {
 question.addEventListener('input', clamp);
 stopBtn.addEventListener('click', () => {
   window.explainApi.stop();
-  lastId = null;
+  invalidate();
+  showHint('', false);
   setState(latestAnswer.length > 0 ? 'done' : 'idle');
   copy.disabled = latestAnswer.length === 0;
 });
-closeBtn.addEventListener('click', () => window.explainApi.close());
+function close(): void { invalidate(); vision.destroy(); window.explainApi.close(); }
+closeBtn.addEventListener('click', close);
 openSettingsBtn.addEventListener('click', () => window.explainApi.openSettings());
 retry.addEventListener('click', () => {
+  if (state === 'generating') return;
+  if (lastMode === 'vision') {
+    invalidate();
+    vision.close();
+    setState('idle');
+    showHint(words?.vision.reviewAgain ?? '', false);
+    return;
+  }
   question.value = lastQuestion;
   void ask();
 });
@@ -136,12 +212,25 @@ copy.addEventListener('click', () => {
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
-    window.explainApi.close();
+    close();
   }
 });
 
 /** Model output is untrusted text: it arrives only through textContent and never as markup. */
-window.explainApi.on((ev) => {
+function receive(ev: ExplainEvent): void {
+  if (awaitingId) {
+    // Main may push before invoke resolves. Bound both candidate IDs and answer text while awaiting that ID.
+    let buffered = early.get(ev.id);
+    if (!buffered && early.size < 8) {
+      buffered = { text: '', terminal: null };
+      early.set(ev.id, buffered);
+    }
+    if (buffered && !buffered.terminal) {
+      if (ev.kind === 'delta') buffered.text = (buffered.text + ev.text).slice(0, 20_000);
+      else buffered.terminal = ev;
+    }
+    return;
+  }
   if (lastId === null || ev.id !== lastId) return; // stale: a replaced, stopped or dead request
   if (ev.kind === 'delta') {
     latestAnswer += ev.text;
@@ -149,27 +238,29 @@ window.explainApi.on((ev) => {
     answer.scrollTop = answer.scrollHeight;
   } else if (ev.kind === 'done') {
     lastId = null;
+    showHint('', false);
     if (latestAnswer.length > 0) {
       setState('done');
       copy.disabled = false;
     } else {
-      failureTitle.textContent = words?.errorTitle ?? '';
-      failureText.textContent = errorText('badResponse');
-      setState('error');
+      fail('badResponse');
     }
   } else {
-    lastId = null;
-    failureTitle.textContent = words?.errorTitle ?? '';
-    failureText.textContent = errorText(ev.code);
-    setState('error');
+    fail(ev.code);
   }
-});
+}
+window.explainApi.on(receive);
 
 void window.explainApi.strings().then((t) => {
   if (!t) return;
   words = t;
   document.title = t.title;
   title.textContent = t.title;
+  $('subtitle').textContent = t.subtitle;
+  updateModeLabel();
+  $('emptyTitle').textContent = t.emptyTitle;
+  $('emptyHint').textContent = t.emptyHint;
+  $('resizeHint').textContent = t.resizeHint;
   question.placeholder = t.placeholder;
   send.textContent = t.ask;
   stopBtn.textContent = t.stop;
@@ -184,7 +275,8 @@ void window.explainApi.strings().then((t) => {
 void window.explainApi.state().then((s) => {
   if (!s) return;
   if (!s.configured) setState('unconfigured');
-  vision.setSession(s.visionSessionId);
+  vision.setConfigured(s.configured);
+  setSession(s.visionSessionId);
   vision.setAvailable(s.captureAvailable);
 });
 requestAnimationFrame(() => question.focus());

@@ -1,5 +1,6 @@
 import type { ExplainApi } from '../../shared/ipc';
-import type { VisionErrorCode, VisionImage, VisionText } from '../../shared/vision';
+import type { VisionAsk, VisionErrorCode, VisionImage, VisionSendState, VisionSnapshotInfo, VisionText } from '../../shared/vision';
+import { MAX_QUESTION } from '../../shared/explain';
 
 export interface VisionElements {
   open: HTMLButtonElement;
@@ -16,6 +17,13 @@ export interface VisionElements {
   fullCaption: HTMLElement;
   localMarker: HTMLElement;
   fullMarker: HTMLElement;
+  includeFull?: HTMLInputElement;
+  includeFullLabel?: HTMLElement;
+  selection?: HTMLElement;
+  destination?: HTMLElement;
+  uploadPrivacy?: HTMLElement;
+  question?: HTMLInputElement;
+  send?: HTMLButtonElement;
 }
 
 /** Keeps image ownership separate from the text stream and invalidates every late capture on close or reentry. */
@@ -27,15 +35,36 @@ export class VisionPreview {
   private opened = false;
   private loading = false;
   private disposed = false;
+  private configured = false;
+  private busy = false;
+  private captureError: VisionErrorCode | null = null;
+  private localFailed = false;
+  private fullFailed = false;
+  private snapshot: VisionSnapshotInfo | null = null;
+  private expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly selectionListener = (): void => this.updateButtons();
+  private readonly loadListener = (event: Event): void => {
+    if (event.currentTarget === this.elements.local) this.localFailed = event.type === 'error';
+    if (event.currentTarget === this.elements.full) this.fullFailed = event.type === 'error';
+    this.updateButtons();
+  };
+  private readonly sendListener = (): void => this.submit();
   private readonly openListener = (): void => { void this.open(); };
   private readonly closeListener = (): void => this.close();
 
   constructor(
     private readonly api: Pick<ExplainApi, 'capture' | 'closePreview'>,
     private readonly elements: VisionElements,
+    private readonly onSend?: (request: VisionAsk) => void,
   ) {
     elements.open.addEventListener('click', this.openListener);
     elements.close.addEventListener('click', this.closeListener);
+    elements.includeFull?.addEventListener('change', this.selectionListener);
+    elements.local.addEventListener('load', this.loadListener);
+    elements.full.addEventListener('load', this.loadListener);
+    elements.local.addEventListener('error', this.loadListener);
+    elements.full.addEventListener('error', this.loadListener);
+    elements.send?.addEventListener('click', this.sendListener);
     this.reset();
   }
 
@@ -48,6 +77,10 @@ export class VisionPreview {
     e.timing.textContent = words.timing;
     e.local.alt = words.local;
     e.full.alt = words.full;
+    if (e.includeFullLabel) e.includeFullLabel.textContent = words.includeFull;
+    if (e.uploadPrivacy) e.uploadPrivacy.textContent = words.uploadPrivacy;
+    if (e.question) { e.question.placeholder = words.question; e.question.setAttribute('aria-label', words.question); }
+    if (e.send) e.send.textContent = words.send;
     for (const marker of [e.localMarker, e.fullMarker]) {
       marker.setAttribute('aria-label', words.marker);
       marker.setAttribute('title', words.marker);
@@ -57,6 +90,16 @@ export class VisionPreview {
 
   setAvailable(available: boolean): void {
     this.available = available;
+    this.updateButtons();
+  }
+
+  setConfigured(configured: boolean): void {
+    this.configured = configured;
+    this.updateButtons();
+  }
+
+  setBusy(busy: boolean): void {
+    this.busy = busy;
     this.updateButtons();
   }
 
@@ -70,6 +113,8 @@ export class VisionPreview {
   async open(): Promise<void> {
     if (!this.words || !this.available || this.sessionId === 0 || this.loading || this.disposed) return;
     this.clearImages();
+    this.captureError = null;
+    if (this.elements.includeFull) this.elements.includeFull.checked = false;
     this.opened = true;
     this.loading = true;
     const requestId = ++this.requestId;
@@ -88,6 +133,12 @@ export class VisionPreview {
       } else if (!reply.result.ok) {
         this.fail(reply.result.code);
       } else {
+        this.snapshot = reply.snapshot ?? null;
+        if (this.snapshot) {
+          // Fresh main-owned approval supersedes the card's one-time configuration query.
+          this.configured = true;
+          this.expiryTimer = setTimeout(() => this.updateButtons(), Math.max(0, this.snapshot.expiresAt - Date.now()));
+        }
         const { local, full } = reply.result.preview;
         this.drawImage(e.local, e.localMarker, e.localCaption, this.words.local, local);
         this.drawImage(e.full, e.fullMarker, e.fullCaption, this.words.full, full);
@@ -114,6 +165,12 @@ export class VisionPreview {
     this.reset();
     this.elements.open.removeEventListener('click', this.openListener);
     this.elements.close.removeEventListener('click', this.closeListener);
+    this.elements.includeFull?.removeEventListener('change', this.selectionListener);
+    this.elements.send?.removeEventListener('click', this.sendListener);
+    for (const image of [this.elements.local, this.elements.full]) {
+      image.removeEventListener('load', this.loadListener);
+      image.removeEventListener('error', this.loadListener);
+    }
   }
 
   private isCurrent(sessionId: number, requestId: number): boolean {
@@ -133,11 +190,17 @@ export class VisionPreview {
 
   private fail(code: VisionErrorCode): void {
     this.clearImages();
+    this.captureError = code;
     this.elements.status.textContent = this.words?.errors[code] ?? '';
     this.elements.status.classList.add('warn');
   }
 
   private clearImages(): void {
+    if (this.expiryTimer !== null) clearTimeout(this.expiryTimer);
+    this.expiryTimer = null;
+    this.snapshot = null;
+    this.localFailed = false;
+    this.fullFailed = false;
     const e = this.elements;
     e.images.hidden = true;
     for (const image of [e.local, e.full]) {
@@ -153,6 +216,9 @@ export class VisionPreview {
     this.requestId += 1;
     this.opened = false;
     this.loading = false;
+    this.captureError = null;
+    if (this.elements.includeFull) this.elements.includeFull.checked = false;
+    if (this.elements.question) this.elements.question.value = '';
     this.clearImages();
     this.elements.preview.hidden = true;
     this.elements.text.hidden = false;
@@ -163,8 +229,64 @@ export class VisionPreview {
 
   private updateButtons(): void {
     const e = this.elements;
-    e.open.hidden = !this.available || this.opened || this.disposed;
+    const reason = this.sendState();
+    const recapture = this.opened && ['expired', 'captureFailed', 'noSnapshot', 'imageFailed', 'unconfigured'].includes(reason);
+    e.open.hidden = !this.available || (this.opened && !recapture) || this.disposed;
     e.open.disabled = !this.words || this.sessionId === 0 || this.loading;
+    e.open.textContent = (recapture ? this.words?.recapture : this.words?.open) ?? '';
     e.close.hidden = !this.opened || this.disposed;
+    const full = e.includeFull?.checked ?? false;
+    if (e.selection) e.selection.textContent = (full ? this.words?.selectedBoth : this.words?.selectedLocal) ?? '';
+    if (e.destination) e.destination.textContent = this.snapshot
+      ? `${this.words?.destination ?? ''} ${this.snapshot.recipient.domain} / ${this.snapshot.recipient.model}`
+      : this.words?.notConfigured ?? '';
+    if (this.opened && !this.loading && !this.captureError) {
+      const status = reason === 'expired' ? this.words?.expired
+        : reason === 'unconfigured' ? this.words?.notConfigured
+        : reason === 'noSnapshot' ? this.words?.snapshotUnavailable
+        : reason === 'imageFailed' ? this.words?.imageLoadFailed
+        : reason === 'localPending' || reason === 'fullPending' ? this.words?.loadingImages
+        : reason === 'busy' ? this.words?.waitForAnswer : '';
+      e.status.textContent = status ?? '';
+      if (['expired', 'unconfigured', 'noSnapshot', 'imageFailed'].includes(reason)) e.status.classList.add('warn');
+      else e.status.classList.remove('warn');
+    }
+    if (e.send) {
+      e.send.disabled = reason !== 'ready';
+      e.send.setAttribute('data-block-reason', reason);
+    }
+  }
+
+  private sendState(): VisionSendState {
+    const e = this.elements;
+    const loaded = (image: HTMLImageElement): boolean => image.complete && image.naturalWidth > 0;
+    if (this.disposed) return 'disposed';
+    if (!this.onSend || !this.words || !this.available) return 'unavailable';
+    if (this.sessionId === 0) return 'noSession';
+    if (!this.opened) return 'closed';
+    if (this.loading) return 'capturing';
+    if (this.captureError) return 'captureFailed';
+    if (!this.configured) return 'unconfigured';
+    if (!this.snapshot || !this.snapshot.recipient.domain || !this.snapshot.recipient.model) return 'noSnapshot';
+    if (this.snapshot.expiresAt <= Date.now()) return 'expired';
+    if (this.busy) return 'busy';
+    if (this.localFailed || (e.includeFull?.checked && this.fullFailed)) return 'imageFailed';
+    if (!loaded(e.local)) return 'localPending';
+    if (e.includeFull?.checked && !loaded(e.full)) return 'fullPending';
+    return 'ready';
+  }
+
+  private submit(): void {
+    this.updateButtons();
+    if (this.sendState() !== 'ready' || !this.snapshot || !this.words) return;
+    const question = [...(this.elements.question?.value.trim() || this.words.defaultQuestion)]
+      .slice(0, MAX_QUESTION).join('');
+    const request: VisionAsk = {
+      sessionId: this.sessionId, snapshotId: this.snapshot.snapshotId,
+      scope: this.elements.includeFull?.checked ? 'localAndFull' : 'local', question, confirmed: true,
+    };
+    // Sending consumes the snapshot. Restore text locally; a user close would cancel main's request.
+    this.reset();
+    this.onSend?.(request);
   }
 }

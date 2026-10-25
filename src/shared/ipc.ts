@@ -11,7 +11,7 @@ import { PEER_RE } from './roomProtocol';
 import type { OverlaySettings, RoomTextStyle, Settings } from './settings';
 import type { UpdateState } from './update';
 import type { VoteView } from './voteTally';
-import type { VisionReply, VisionText } from './vision';
+import type { VisionAsk, VisionReply, VisionText } from './vision';
 
 export interface Point {
   x: number;
@@ -81,11 +81,18 @@ export const EXPLAIN_CH = {
   ask: 'explain:ask', stop: 'explain:stop', strings: 'explain:strings', close: 'explain:close', openSettings: 'explain:openSettings',
   event: 'explain:event', state: 'explain:state',
   capture: 'explain:capture', closePreview: 'explain:closePreview', visionSession: 'explain:visionSession',
+  askVision: 'explain:askVision',
 } as const;
 
 /** The explain window's words, in the language the app uses. */
 export interface ExplainText {
   title: string;
+  subtitle: string;
+  textModeLabel: string;
+  visionModeLabel: string;
+  emptyTitle: string;
+  emptyHint: string;
+  resizeHint: string;
   placeholder: string;
   ask: string;
   stop: string;
@@ -124,6 +131,7 @@ export interface ExplainState {
  */
 export interface ExplainApi {
   ask(question: string): Promise<number | null>;
+  askVision(request: VisionAsk): Promise<{ ok: true; id: number } | { ok: false; code: AiErrorCode } | null>;
   stop(): void;
   strings(): Promise<ExplainText | null>;
   state(): Promise<ExplainState | null>;

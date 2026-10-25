@@ -100,6 +100,10 @@ This fork adds an AI question window. Turn it on under **Settings → Features**
 
 You bring the service: fill in an **API base URL**, a **model name** and an **API key** of any OpenAI-compatible chat completions endpoint. Your questions and answers go to that service and nowhere else, and usage may cost money on that service’s plan. The key is encrypted with your system’s credential protection (safeStorage; DPAPI on Windows) and stored next to the settings — never in `settings.json`, never shown again, and **Remove key** forgets it. Only HTTPS endpoints are accepted; loopback, private and local addresses are refused.
 
+On Windows, **Local screenshot preview** shows the original ping area and monitor context locally. The original **Ask** button sends text only. To ask about an image, review the preview and click **Send selected screenshots and ask**: one local crop is selected by default; including the full monitor requires checking its box. The card names the recipient domain and model. Only the selected JPEGs leave the machine, going to your configured third-party AI service; check them for personal information first and use a model that supports images. Closing or expiring a preview invalidates its temporary in-memory upload snapshot. Image retry requires a fresh preview and confirmation; it never uploads automatically.
+
+Drag the card's title bar to move it, drag its edges to resize it, or double-click the title to expand and restore it. Wider windows show the two previews side by side. Image scrolling is separate from the question and send controls.
+
 ## Updates
 
 lolPing checks GitHub for a new version 10 seconds after it starts, then every 6 hours. When there is one, you get a notice on screen, and the tray menu and **Settings → App → About** offer **Update**. It asks first: nothing downloads until you click.
