@@ -77,6 +77,24 @@ const consentReply = (): VisionReply => ({
 });
 
 describe('VisionPreview', () => {
+  it('submits on Enter only after review, and ignores IME confirmation, held keys and stale snapshots', async () => {
+    vi.useFakeTimers();
+    const { preview, ui, sent } = setup(vi.fn(async () => consentReply()));
+    const enter = (extra = {}) => ui.question.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }),
+      { key: 'Enter', isComposing: false, keyCode: 13, repeat: false, ...extra }));
+    await preview.open();
+    enter(); expect(sent).not.toHaveBeenCalled();
+    ui.local.loaded(); ui.full.loaded();
+    enter({ isComposing: true }); enter({ keyCode: 229 }); enter({ repeat: true });
+    expect(sent).not.toHaveBeenCalled();
+    preview.setBusy(true); enter(); expect(sent).not.toHaveBeenCalled(); preview.setBusy(false);
+    ui.question.value = 'Synthetic keyboard question'; enter(); enter();
+    expect(sent).toHaveBeenCalledExactlyOnceWith({ sessionId: 1, snapshotId: 17, scope: 'local',
+      question: 'Synthetic keyboard question', confirmed: true });
+    await preview.open(); ui.local.loaded(); vi.advanceTimersByTime(30_000); enter();
+    expect(sent).toHaveBeenCalledTimes(1);
+    preview.destroy();
+  });
   it('uses new main-owned snapshot metadata after configuration becomes ready while the card stays open', async () => {
     const { preview, ui, sent } = setup(vi.fn(async () => consentReply()));
     preview.setConfigured(false);

@@ -1,8 +1,9 @@
 import { MAX_QUESTION } from '../../shared/explain';
 import type { AiErrorCode } from '../../shared/aiConfig';
-import type { ExplainEvent, ExplainText } from '../../shared/ipc';
+import type { ExplainEvent, ExplainText, ExplainUiDiagnostic } from '../../shared/ipc';
 import type { VisionAsk } from '../../shared/vision';
 import { VisionPreview } from './visionPreview';
+import { submitOnEnter } from './submitKey';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const title = $('title');
@@ -47,6 +48,8 @@ window.addEventListener('beforeunload', () => {
 
 let words: ExplainText | null = null;
 let lastId: number | null = null;
+let diagnosticsEnabled = false;
+let diagnosticId: number | null = null;
 let latestAnswer = '';
 let lastQuestion = '';
 let lastMode: 'text' | 'vision' = 'text';
@@ -56,12 +59,22 @@ let awaitingId = false;
 let copying = false;
 let closed = false;
 let closeAfterCopy = false;
+let questionComposing = false;
+let blockImplicitSubmit = false;
 type Terminal = Extract<ExplainEvent, { kind: 'done' | 'error' }>;
 const early = new Map<number, { text: string; terminal: Terminal | null }>();
 
 /** The states the card can be in; every transition goes through setState so the buttons stay consistent. */
 type State = 'idle' | 'unconfigured' | 'generating' | 'done' | 'error';
 let state: State = 'idle';
+
+function reportUi(phase: ExplainUiDiagnostic['phase']): void {
+  if (!diagnosticsEnabled || diagnosticId === null) return;
+  try {
+    window.explainApi.reportDiagnostic?.({ id: diagnosticId, phase, state: closed ? 'closed' : state,
+      characters: latestAnswer.length, sendDisabled: send.disabled, stopVisible: !stopBtn.hidden });
+  } catch { /* Diagnostic failures must not change interaction or completion. */ }
+}
 
 /** A code point is one letter, one Chinese character or one emoji, however many UTF-16 units it takes. */
 function clamp(): void {
@@ -123,6 +136,7 @@ function setSession(next: number): void {
   sessionId = next;
   vision.setSession(next);
   if (lastMode === 'vision') {
+    diagnosticId = null;
     invalidate();
     lastMode = 'text';
     latestAnswer = '';
@@ -152,6 +166,7 @@ function fail(code: AiErrorCode): void {
 async function askRequest(q: string, screenshot?: VisionAsk): Promise<void> {
   if (closed || !words || state === 'generating') return;
   invalidate();
+  diagnosticId = null;
   const requestEpoch = epoch;
   lastQuestion = q;
   lastMode = screenshot ? 'vision' : 'text';
@@ -172,6 +187,8 @@ async function askRequest(q: string, screenshot?: VisionAsk): Promise<void> {
     if (typeof reply !== 'number' && !reply.ok) { fail(reply.code); return; }
     const id = typeof reply === 'number' ? reply : reply.id;
     lastId = id;
+    diagnosticId = id;
+    reportUi('started');
     const buffered = early.get(id);
     early.clear();
     if (buffered?.text) receive({ kind: 'delta', id, text: buffered.text });
@@ -183,14 +200,27 @@ async function askRequest(q: string, screenshot?: VisionAsk): Promise<void> {
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
-  if (state !== 'generating') void ask();
+  if (!questionComposing && !blockImplicitSubmit && state !== 'generating') void ask();
 });
 question.addEventListener('input', clamp);
+question.addEventListener('compositionstart', () => { questionComposing = true; blockImplicitSubmit = true; });
+question.addEventListener('compositionend', () => { questionComposing = false; });
+question.addEventListener('keydown', event => {
+  // IME Enter may still trigger the form's default submit after keydown was correctly ignored.
+  blockImplicitSubmit = questionComposing || event.isComposing || event.keyCode === 229 || event.repeat
+    || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey;
+  if (!questionComposing) submitOnEnter(event, () => { void ask(); });
+});
+send.addEventListener('click', event => {
+  // A candidate's implicit click has detail=0 and leaves focus in the question field.
+  if (event.detail > 0 || document.activeElement === send) blockImplicitSubmit = false;
+});
 stopBtn.addEventListener('click', () => {
   window.explainApi.stop();
   invalidate();
   showHint('', false);
   setState(latestAnswer.length > 0 ? 'done' : 'idle');
+  reportUi('stop');
 });
 function close(): void {
   if (closed) {
@@ -202,6 +232,7 @@ function close(): void {
   invalidate();
   vision.destroy();
   send.disabled = true;
+  reportUi('close');
   if (copying) {
     closeAfterCopy = true;
     window.explainApi.stop();
@@ -287,6 +318,7 @@ function receive(ev: ExplainEvent): void {
   } else {
     fail(ev.code);
   }
+  if (ev.kind !== 'delta') reportUi('terminal');
 }
 window.explainApi.on(receive);
 
@@ -313,9 +345,11 @@ void window.explainApi.strings().then((t) => {
 });
 void window.explainApi.state().then((s) => {
   if (!s) return;
+  diagnosticsEnabled = s.diagnosticsEnabled === true;
   if (!s.configured) setState('unconfigured');
   vision.setConfigured(s.configured);
   setSession(s.visionSessionId);
   vision.setAvailable(s.captureAvailable);
+  if (diagnosticId !== null) reportUi(state === 'generating' ? 'started' : 'terminal');
 });
 requestAnimationFrame(() => question.focus());

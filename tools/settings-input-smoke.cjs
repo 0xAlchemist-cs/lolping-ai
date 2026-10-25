@@ -48,7 +48,7 @@ contextBridge.exposeInMainWorld('settingsApi',{
 
 function run() {
   const { app, BrowserWindow, ipcMain, session } = require('electron');
-  const { DEFAULT_SETTINGS } = require('../src/shared/settings.ts');
+  const { DEFAULT_SETTINGS, mergeSettings } = require('../src/shared/settings.ts');
   let settings = { ...DEFAULT_SETTINGS, aiBaseUrl: 'https://mock.invalid/v1', aiModel: 'mock-vision' };
   const pending = [];
   let externalRequests = 0;
@@ -71,10 +71,10 @@ function run() {
       ipcMain.handle('fixture:get', () => settings);
       ipcMain.handle('fixture:forbidden', () => { forbiddenCalls++; throw Error('forbiddenFixtureCall'); });
       ipcMain.handle('fixture:set', (event, patch) => {
-        check(Object.keys(patch).every(k => ['aiBaseUrl', 'aiModel'].includes(k)), 'unexpectedSettingWrite');
+        check(Object.keys(patch).every(k => ['aiBaseUrl', 'aiModel', 'aiMaxTokens'].includes(k)), 'unexpectedSettingWrite');
         saves++;
         return new Promise(done => pending.push(() => {
-          settings = { ...settings, ...patch };
+          settings = mergeSettings(settings, patch);
           event.sender.send('fixture:settings', settings);
           done({ ok: true, settings });
         }));
@@ -132,10 +132,17 @@ function run() {
       await assertField(0, edited, 14, 'baseUrlReply');
       await evaluate(`${field(0)}.blur()`); await paint();
       check(settings.aiModel === 'mock中文-vision' && settings.aiBaseUrl === edited, 'persistedDraftMismatch');
+      check(await evaluate('document.querySelector("select").value === "8192"'), 'defaultBudgetMissing');
+      await evaluate('(()=>{const e=document.querySelector("select");e.value="4096";e.dispatchEvent(new Event("change",{bubbles:true}))})()');
+      await release(true);
+      check(settings.aiMaxTokens === 4096, 'budgetNotSaved');
+      const reloaded = new Promise(done => card.webContents.once('did-finish-load', done));
+      card.reload(); await reloaded;
+      await wait(() => evaluate('document.querySelector("select")?.value === "4096"'), 'budgetNotRestored');
       check(externalRequests === 0 && forbiddenCalls === 0, 'fixturePrivacyFailure');
       console.log(JSON.stringify({ status: 'PASS', syntheticOnly: true, actualFluentInputs: true,
         middleInsert: true, rapidInput: true, olderReply: true, middleDelete: true, unicodeReplace: true,
-        baseUrlEditing: true, persisted: true, saves, externalRequests, aiCalls: forbiddenCalls }));
+        baseUrlEditing: true, outputBudgetSavedAndRestored: true, persisted: true, saves, externalRequests, aiCalls: forbiddenCalls }));
       app.exit(0);
     } catch (error) {
       const code = /^[a-zA-Z][a-zA-Z0-9]{0,65}$/.test(error.message) ? error.message : 'unexpectedFixtureFailure';

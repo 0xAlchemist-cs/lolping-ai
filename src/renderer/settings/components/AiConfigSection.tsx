@@ -1,8 +1,9 @@
 import { ArrowClockwise24Regular, Key24Regular } from '@fluentui/react-icons';
-import { Button, Input, Spinner } from '@fluentui/react-components';
+import { Button, Input, Select, Spinner } from '@fluentui/react-components';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { AiStatus } from '../../../shared/ipc';
 import type { Settings } from '../../../shared/settings';
+import { AI_MAX_TOKEN_OPTIONS } from '../../../shared/aiConfig';
 import { useText } from '../text';
 import type { Update } from '../useAppState';
 import { SettingRow } from './rows';
@@ -108,6 +109,12 @@ export function AiConfigSection({ settings: s, update }: { settings: Settings; u
           </Button>
           <Button disabled={!status?.hasKey} onClick={() => void removeKey()}>{t.aiSettings.keyRemove}</Button>
         </div>
+      </SettingRow>
+      <SettingRow icon={<ArrowClockwise24Regular />} title={t.aiSettings.maxTokens} description={t.aiSettings.maxTokensDesc}>
+        <Select aria-label={t.aiSettings.maxTokens} value={String(s.aiMaxTokens)}
+          onChange={(_, data) => { void update({ aiMaxTokens: Number(data.value) }); }}>
+          {AI_MAX_TOKEN_OPTIONS.map(value => <option key={value} value={value}>{value}</option>)}
+        </Select>
       </SettingRow>
       {(statusLine !== null || keyMsg) && (
         <SettingRow icon={<ArrowClockwise24Regular />} title={keyMsg ?? statusLine ?? ''}>

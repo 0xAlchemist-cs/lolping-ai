@@ -27,7 +27,9 @@ export type AiFetch = (url: string, init: {
 /** Bounded metadata for an injected local observer; no question, response text, URL, key or server message. */
 export interface StreamDiagnostic {
   mode: 'text' | 'vision' | 'probe';
+  stage: 'prepare' | 'validation' | 'http' | 'sse';
   httpStatus: number | null;
+  sseEvents: number;
   deltaCount: number;
   characters: number;
   finishReason: 'stop' | 'length' | 'other' | null;
@@ -37,6 +39,15 @@ export interface StreamDiagnostic {
   errorCode: AiErrorCode | null;
   outputLimited: boolean;
   elapsedMs: number;
+  timeoutKind: 'idle' | 'total' | null;
+  cancelSource: CancelSource | null;
+}
+
+export type CancelSource = 'user' | 'window' | 'replaced' | 'other';
+/** Never copy an arbitrary AbortSignal reason into a diagnostic. */
+export function cancelSource(signal: AbortSignal): CancelSource | null {
+  if (!signal.aborted) return null;
+  return ['user', 'window', 'replaced'].includes(signal.reason) ? signal.reason as CancelSource : 'other';
 }
 
 export interface StreamDeps {
@@ -51,7 +62,7 @@ export interface StreamDeps {
   maxChars?: number;
   /** Cap sent to the service as max_tokens. */
   maxTokens?: number;
-  /** Opt-in local test observer, invoked once at termination. Not wired to logs, IPC or real app configuration. */
+  /** Opt-in local observer, invoked once at termination; observer failures cannot change completion. */
   onDiagnostic?: (diagnostic: Readonly<StreamDiagnostic>) => void;
 }
 
@@ -195,8 +206,8 @@ function chatContent(question: string, images?: readonly VisionImage[]): string 
 async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
   const started = args.now();
   const trace: StreamDiagnostic = { mode: allowEmpty ? 'probe' : args.images?.length ? 'vision' : 'text',
-    httpStatus: null, deltaCount: 0, characters: 0, finishReason: null, doneSeen: false,
-    aborted: false, errorCode: null, outputLimited: false, elapsedMs: 0 };
+    stage: 'validation', httpStatus: null, sseEvents: 0, deltaCount: 0, characters: 0, finishReason: null, doneSeen: false,
+    aborted: false, errorCode: null, outputLimited: false, elapsedMs: 0, timeoutKind: null, cancelSource: null };
   try {
     await consumeStream(args, allowEmpty, trace);
   } catch (error) {
@@ -204,9 +215,10 @@ async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
     trace.aborted = args.signal.aborted || trace.errorCode === 'aborted' || trace.errorCode === 'timeout';
     throw error;
   } finally {
-    // Observers cannot alter completion or delay cleanup. The ordinary app installs no observer.
+    // Observers cannot alter completion or delay cleanup.
     try {
       const elapsed = args.now() - started;
+      trace.cancelSource = cancelSource(args.signal);
       args.onDiagnostic?.(Object.freeze({ ...trace, elapsedMs: Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0 }));
     } catch { /* Diagnostic failures must not affect the request. */ }
   }
@@ -238,6 +250,7 @@ async function consumeStream(args: StreamArgs, allowEmpty: boolean, trace: Strea
   };
   const wait = <T>(pending: PromiseLike<T>): Promise<T> => Promise.race([pending, aborted]);
   const fireIdle = (): void => {
+    if (!watchCode) trace.timeoutKind = 'idle';
     abort('timeout');
   };
   const idleMs = idleTimeoutMs;
@@ -247,6 +260,7 @@ async function consumeStream(args: StreamArgs, allowEmpty: boolean, trace: Strea
     idleTimer = setTimeout(fireIdle, idleMs);
   };
   const totalTimer: ReturnType<typeof setTimeout> = setTimeout(() => {
+    if (!watchCode) trace.timeoutKind = 'total';
     abort('timeout');
   }, totalTimeoutMs);
   const onAbort = (): void => {
@@ -258,6 +272,7 @@ async function consumeStream(args: StreamArgs, allowEmpty: boolean, trace: Strea
   let iterator: AsyncIterator<Uint8Array> | null = null;
   try {
     const content = chatContent(args.question, args.images);
+    trace.stage = 'http';
     const res = await wait(args.fetchImpl(url, {
       method: 'POST',
       headers: {
@@ -299,6 +314,7 @@ async function consumeStream(args: StreamArgs, allowEmpty: boolean, trace: Strea
       throw new AiError(code);
     }
     if (!iterator) throw new AiError('badResponse');
+    trace.stage = 'sse';
     const decoder = new TextDecoder('utf-8');
     const parser = new SseParser();
     while (true) {
@@ -310,6 +326,7 @@ async function consumeStream(args: StreamArgs, allowEmpty: boolean, trace: Strea
       armIdle();
       for (const data of parser.push(decoder.decode(chunk, { stream: true }))) {
         if (watchCode) throw new AiError(watchCode);
+        trace.sseEvents += 1;
         if (data === '[DONE]') {
           trace.doneSeen = true;
           if (!allowEmpty && outputLimited) throw new AiError('outputLimit');

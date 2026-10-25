@@ -9,9 +9,11 @@ const EXPLAIN_CH = {
   event: 'explain:event', state: 'explain:state',
   capture: 'explain:capture', closePreview: 'explain:closePreview', visionSession: 'explain:visionSession',
   askVision: 'explain:askVision',
+  diagnostic: 'explain:diagnostic',
 } as const;
 
 const api: ExplainApi = {
+  reportDiagnostic: report => ipcRenderer.send(EXPLAIN_CH.diagnostic, report),
   // Inlined: a sandboxed preload can require electron, but not a generated sibling chunk.
   ask: (question) => ipcRenderer.invoke(EXPLAIN_CH.ask, question),
   askVision: (request) => ipcRenderer.invoke(EXPLAIN_CH.askVision, request),

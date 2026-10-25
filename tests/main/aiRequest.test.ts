@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AiRequests, type PreparedAi } from '../../src/main/aiRequest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AiRequests, createExplainAsk, type PreparedAi } from '../../src/main/aiRequest';
+import { SettingsStore } from '../../src/main/settingsStore';
+import { DEFAULT_SETTINGS } from '../../src/shared/settings';
+import type { StreamDiagnostic } from '../../src/main/aiClient';
 import { TEST_JPEG_DATA_URL } from './fixtures/visionJpeg';
 
 const recipient = { baseUrl: 'https://mock.invalid/v1', model: 'mock-vision' };
@@ -26,6 +32,44 @@ function setup() {
 afterEach(() => vi.useRealTimers());
 
 describe('AiRequests', () => {
+  it('restores budgets from disk across store restarts and uses them in app requests without changing probes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lolping-budget-'));
+    const { aiMaxTokens: _oldBudget, ...legacy } = DEFAULT_SETTINGS;
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ ...legacy, aiBaseUrl: recipient.baseUrl,
+      aiModel: recipient.model, volume: 33 }));
+    let store = new SettingsStore(dir);
+    expect(store.load()).toMatchObject({ aiMaxTokens: 8192, aiBaseUrl: recipient.baseUrl, aiModel: recipient.model, volume: 33 });
+    await store.flush();
+    store = new SettingsStore(dir);
+    expect(store.load().aiMaxTokens).toBe(8192);
+    const budgets: number[] = [];
+    const requests = new AiRequests({ prepare: async () => ready, recipient: () => recipient, now: Date.now,
+      fetchImpl: async (_url, init) => {
+        budgets.push(JSON.parse(init.body).max_tokens);
+        return { ok: true, status: 200, body: (async function* () {
+          yield new TextEncoder().encode('data: {"choices":[{"delta":{"content":"synthetic"}}]}\n\ndata: [DONE]\n\n');
+        })() };
+      } });
+    const ask = createExplainAsk(requests, undefined, () => store.get().aiMaxTokens);
+    await ask('Synthetic', 1, () => undefined);
+    for (const [id, budget] of [[2, 4096], [3, 16384]]) {
+      store.update({ aiMaxTokens: budget }); await store.flush();
+      store = new SettingsStore(dir);
+      expect(store.load()).toMatchObject({ aiMaxTokens: budget, volume: 33, aiModel: recipient.model });
+      await ask('Synthetic', id, () => undefined);
+    }
+    await requests.run('ping', 1, null);
+    expect(budgets).toEqual([8192, 4096, 16384, 1]);
+  });
+  it('forwards an optional observer through the real client without changing the request result', async () => {
+    const t = setup(); const summaries: Readonly<StreamDiagnostic>[] = [];
+    const pending = t.requests.run('synthetic observer question', 1024, () => undefined, undefined,
+      summary => summaries.push(summary));
+    t.pending.resolve(ready);
+    expect(await pending).toEqual({ ok: true });
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({ httpStatus: 200, doneSeen: true, characters: 11, errorCode: null });
+  });
   it('finishes the replacement request and refuses late content from a cancelled old server stream', async () => {
     const oldResume = deferred<void>(); const firstToken = deferred<void>();
     let calls = 0; const oldText: string[] = []; const newText: string[] = [];
@@ -52,7 +96,8 @@ describe('AiRequests', () => {
     'does not start a client request when %s occurs during asynchronous key/DNS preparation', async (action) => {
       vi.useFakeTimers();
       const t = setup();
-      const pending = t.requests.run('mock question', 32, () => undefined, t.upload);
+      const summaries: Readonly<StreamDiagnostic>[] = [];
+      const pending = t.requests.run('mock question', 32, () => undefined, t.upload, summary => summaries.push(summary));
       if (action === 'cancel') t.requests.cancel();
       if (action === 'config') t.change();
       if (action === 'disabled') t.remove();
@@ -62,6 +107,10 @@ describe('AiRequests', () => {
       expect(await pending).toEqual({ ok: false, code: action === 'cancel' ? 'aborted'
         : action === 'expired' ? 'snapshotExpired' : action === 'snapshot' ? 'snapshotStale' : 'configChanged' });
       expect(t.fetchImpl).not.toHaveBeenCalled();
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]).toMatchObject({ stage: 'prepare', httpStatus: null, sseEvents: 0,
+        doneSeen: false, characters: 0, errorCode: action === 'cancel' ? 'aborted'
+          : action === 'expired' ? 'snapshotExpired' : action === 'snapshot' ? 'snapshotStale' : 'configChanged' });
     });
 
   it('allows one approved image request through the actual client and emits only answer content', async () => {

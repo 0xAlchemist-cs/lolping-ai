@@ -21,6 +21,14 @@ export type EndpointCheck = { ok: true; endpoint: AiEndpoint } | { ok: false; co
 
 export const MAX_BASE_URL = 200;
 export const MAX_MODEL = 100;
+export const AI_MAX_TOKEN_OPTIONS = [1024, 2048, 4096, 8192, 16384] as const;
+export const DEFAULT_AI_MAX_TOKENS = 8192;
+
+/** Only offered budgets may enter a request, including from older or hand-edited settings. */
+export function normalizeAiMaxTokens(raw: unknown): number {
+  return typeof raw === 'number' && (AI_MAX_TOKEN_OPTIONS as readonly number[]).includes(raw)
+    ? raw : DEFAULT_AI_MAX_TOKENS;
+}
 
 /** Why a model request failed, as one stable code the UI can name in both languages. */
 export type AiErrorCode =

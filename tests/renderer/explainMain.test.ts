@@ -46,7 +46,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-async function setup() {
+async function setup(diagnosticsEnabled = false) {
   vi.resetModules();
   const elements = new Map<string, Element>();
   const get = (id: string): Element => {
@@ -62,7 +62,8 @@ async function setup() {
     ask: vi.fn(() => pending.promise), askVision: vi.fn(async () => ({ ok: true as const, id: 42 })),
     stop: vi.fn(), close: vi.fn(), openSettings: vi.fn(), closePreview: vi.fn(),
     strings: async () => ({ ...strings('en').explainWindow, errors: strings('en').aiError }),
-    state: async () => ({ configured: true, visionSessionId: 1, captureAvailable: true }),
+    state: async () => ({ configured: true, visionSessionId: 1, captureAvailable: true, diagnosticsEnabled }),
+    reportDiagnostic: vi.fn(),
     capture: vi.fn(async () => screenshot()),
     on: (cb) => { receive = cb; return () => undefined; },
     onVisionSession: (cb) => { session = cb; return () => undefined; },
@@ -82,6 +83,42 @@ async function setup() {
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Explain renderer', () => {
+  it('blocks native form fallback throughout IME confirmation until a fresh explicit send', async () => {
+    const t = await setup(); t.get('question').value = 'Synthetic composition';
+    t.get('question').dispatchEvent(new Event('compositionstart'));
+    t.submit();
+    t.get('question').dispatchEvent(new Event('compositionend'));
+    t.submit();
+    expect(t.api.ask).not.toHaveBeenCalled();
+    t.get('send').dispatchEvent(Object.assign(new Event('click'), { detail: 1 }));
+    t.submit();
+    expect(t.api.ask).toHaveBeenCalledExactlyOnceWith('Synthetic composition');
+    t.pending.resolve(9); await Promise.resolve();
+  });
+  it('submits text on Enter without sending IME confirmation or repeated keydown', async () => {
+    const t = await setup();
+    t.get('question').value = 'Synthetic keyboard question';
+    const enter = (extra = {}) => t.get('question').dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }),
+      { key: 'Enter', isComposing: false, keyCode: 13, repeat: false, ...extra }));
+    enter({ isComposing: true }); enter({ keyCode: 229 }); enter({ repeat: true });
+    expect(t.api.ask).not.toHaveBeenCalled();
+    enter(); enter();
+    expect(t.api.ask).toHaveBeenCalledExactlyOnceWith('Synthetic keyboard question');
+    t.pending.resolve(9); await Promise.resolve();
+  });
+  it.each([false, true])('reports applied terminal UI metadata only when explicitly enabled: %s', async enabled => {
+    const t = await setup(enabled);
+    t.get('question').value = 'Synthetic private question'; t.submit();
+    t.pending.resolve(9); await Promise.resolve();
+    t.receive({ kind: 'delta', id: 9, text: 'Synthetic private answer' });
+    t.receive({ kind: 'done', id: 9 });
+    if (!enabled) expect(t.api.reportDiagnostic).not.toHaveBeenCalled();
+    else {
+      expect(t.api.reportDiagnostic).toHaveBeenLastCalledWith({ id: 9, phase: 'terminal', state: 'done',
+        characters: 24, sendDisabled: false, stopVisible: false });
+      expect(JSON.stringify(vi.mocked(t.api.reportDiagnostic)?.mock.calls)).not.toContain('Synthetic');
+    }
+  });
   async function answered(text = 'Synthetic answer') {
     const t = await setup();
     t.get('question').value = 'Synthetic question';

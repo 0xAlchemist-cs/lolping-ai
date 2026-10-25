@@ -10,6 +10,8 @@ const stop = event({}, 'stop');
 const length = event({}, 'length');
 const reasoning = 'data: {"choices":\r\ndata: [{"delta":{"reasoning_content":"hidden sentinel"}}]}\r\n\r\n';
 const cases = [
+  { name: 'body + DONE without finish reason stays compatible', frames: [content, done], want: null,
+    visible: 'prefix', reason: null, done: true },
   { name: 'normal stop + DONE', frames: [content, stop, done], want: null, visible: 'prefix', reason: 'stop', done: true },
   { name: 'length + DONE', frames: [content, length, done], want: 'outputLimit', visible: 'prefix', reason: 'length', done: true },
   { name: 'length without DONE', frames: [content, length], want: 'badResponse', visible: 'prefix', reason: 'length', done: false },
@@ -73,10 +75,11 @@ describe('AI termination diagnostics', () => {
     expect(seen.join('')).toBe(scenario.visible);
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(summaries).toHaveLength(1);
-    expect(summaries[0]).toEqual({ mode: 'text', httpStatus: 200, deltaCount: seen.length,
+    expect(summaries[0]).toMatchObject({ mode: 'text', httpStatus: 200, deltaCount: seen.length,
       characters: scenario.visible.length, finishReason: scenario.reason, doneSeen: scenario.done,
       aborted: false, errorCode: scenario.want, outputLimited: scenario.reason === 'length',
-      elapsedMs: scenario.visible ? 20 : 0 });
+      elapsedMs: scenario.visible ? 20 : 0, stage: 'sse', timeoutKind: null, cancelSource: null });
+    expect(summaries[0].sseEvents).toBeGreaterThan(0);
     const serialized = JSON.stringify(summaries);
     for (const secret of ['synthetic private', 'hidden sentinel', 'private echo', 'private network', 'provider secret', 'prefix']) {
       expect(serialized).not.toContain(secret);
@@ -84,17 +87,19 @@ describe('AI termination diagnostics', () => {
     expect(Object.isFrozen(summaries[0])).toBe(true);
   });
 
-  it('classifies a silent service with the idle timeout rather than a fabricated DONE', async () => {
+  it.each(['idle', 'total'] as const)('classifies the %s watchdog rather than a fabricated DONE', async kind => {
     vi.useFakeTimers();
     const summaries: StreamDiagnostic[] = [];
     const args: StreamArgs = { baseUrl: 'https://fixture.invalid', model: 'fixture', key: 'synthetic', question: 'synthetic',
-      signal: new AbortController().signal, now: Date.now, idleTimeoutMs: 50,
+      signal: new AbortController().signal, now: Date.now, idleTimeoutMs: kind === 'idle' ? 50 : 100,
+      totalTimeoutMs: kind === 'total' ? 50 : 100,
       fetchImpl: async () => ({ ok: true, status: 200, body: (async function* () { await new Promise(() => {}); })() }),
       onDelta: () => { throw new Error('unexpectedDelta'); }, onDiagnostic: info => summaries.push(info) };
     const pending = expect(streamChat(args)).rejects.toMatchObject({ code: 'timeout' });
     await vi.advanceTimersByTimeAsync(50); await pending;
     expect(summaries).toHaveLength(1);
-    expect(summaries[0]).toMatchObject({ deltaCount: 0, characters: 0, doneSeen: false, aborted: true, errorCode: 'timeout', elapsedMs: 50 });
+    expect(summaries[0]).toMatchObject({ deltaCount: 0, characters: 0, doneSeen: false, aborted: true,
+      errorCode: 'timeout', elapsedMs: 50, timeoutKind: kind, cancelSource: null });
   });
 
   it('reports explicit Stop once and drops content even when the server continues returning', async () => {

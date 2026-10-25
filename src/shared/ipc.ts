@@ -82,6 +82,7 @@ export const EXPLAIN_CH = {
   event: 'explain:event', state: 'explain:state',
   capture: 'explain:capture', closePreview: 'explain:closePreview', visionSession: 'explain:visionSession',
   askVision: 'explain:askVision',
+  diagnostic: 'explain:diagnostic',
 } as const;
 
 /** The explain window's words, in the language the app uses. */
@@ -123,6 +124,17 @@ export interface ExplainState {
   configured: boolean;
   visionSessionId: number;
   captureAvailable: boolean;
+  diagnosticsEnabled?: boolean;
+}
+
+/** Development-only state acknowledgement. Never carries a question, answer or screenshot. */
+export interface ExplainUiDiagnostic {
+  id: number;
+  phase: 'started' | 'terminal' | 'stop' | 'close';
+  state: 'idle' | 'unconfigured' | 'generating' | 'done' | 'error' | 'closed';
+  characters: number;
+  sendDisabled: boolean;
+  stopVisible: boolean;
 }
 
 /**
@@ -130,6 +142,7 @@ export interface ExplainState {
  * streams and a slow request never blocks an IPC round-trip.
  */
 export interface ExplainApi {
+  reportDiagnostic?(report: ExplainUiDiagnostic): void;
   ask(question: string): Promise<number | null>;
   askVision(request: VisionAsk): Promise<{ ok: true; id: number } | { ok: false; code: AiErrorCode } | null>;
   stop(): void;

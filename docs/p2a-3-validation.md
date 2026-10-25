@@ -357,3 +357,341 @@ HISTORICAL INCIDENT ROOT CAUSE: INCONCLUSIVE
 REAL MODEL TERMINATION RECHECK: NOT TESTED
 
 REAL MODEL COPY RECHECK: NOT TESTED
+
+## 真实 AI 终止与 Clipboard 遗留问题追踪
+
+本节为2026-10-25的PR #5合并前增量调查。起始分支feat/p2a3-stability，HEAD
+fed5cb483b6d7b08d8dbbc861ce2633b20d6fa8a，起始工作区干净。上文交付和历史验收仍为各自阶段记录。
+本轮不合并、不提交、不推送，不调用真实AI；没有沿用历史付费授权。
+
+### A. 已确认问题与修复
+
+1. 观测接线缺失：aiClient已有StreamDiagnostic，但AiRequests和index真实入口未传入观察器。
+   tests/main/aiRequest.test.ts:30实际RED为请求成功但摘要0条；修复后同一路径收到唯一摘要。
+   src/main/aiRequest.ts:26透传观察器并覆盖准备阶段失败；:72的createExplainAsk供index.ts:402和集成检查共同使用，
+   固定1024预算不变。摘要总耗时包含准备；HTTP尚未发生时保持status=null、stage=prepare。
+2. 原有摘要不能区分两种timeout及取消来源。aiClient.ts:27补齐stage、sseEvents、timeoutKind和cancelSource，
+   保留原有完成/异常判定；reason只允许user/window/replaced/other，不序列化任意AbortSignal.reason。
+   aiTermination.test.ts先复现缺字段，再通过定向矩阵；idle和total分别使用假时钟验证。
+3. Close到原生closed存在取消空隙：让窗口close延迟，正文后点击Close再让服务端返回DONE，旧代码仍得到ok=true。
+   tests/main/explainWindow.test.ts:246已实测RED。explainWindow.ts:152在授权Close IPC立即隔离旧ID并cancel(window)，
+   无需等待原生销毁；同一用例GREEN。未改变等待在途复制完成再销毁Renderer的既有行为。
+4. 之前没有实际UI终态证据。新增仅开发环境的可选状态回报，main.ts:68报告已应用的state/正文长度/按钮状态，
+   explainWindow.ts:145校验owner主frame、当前接受的ID、字段/枚举/长度及重复phase；不接收文本、图片或任意日志。
+
+日志基础设施先行检查：现有main使用console，未发现electron-log、AI文件日志或自动持久化AI日志的接线。
+复用StreamDiagnostic；没有独立追踪服务或正文缓存。aiDiagnostics.ts:19默认关闭，只有非packaged进程显式设置
+LOLPING_AI_DIAGNOSTICS=1才输出[ai-diagnostic]选定元数据；生产打包忽略开关，设置探测不装观察器。
+没有增加端口、主机或文件日志。终端/宿主可能留存console，因此摘要仍严格排除问题、答案、URL、Key、请求头、
+图片/Base64、服务端原始错误；不要求重输Key。原生合成夹具主动启用该开关逻辑，真实应用本轮保持默认关闭。
+
+### B. 调用链和状态表
+
+| 阶段/输入 | 成功/失败与转换 | 重复、正文保留和观测边界 |
+|---|---|---|
+| Renderer问题有效且非generating | 清空本次正文，进入generating；输入空白或忙时不发起 | epoch隔离旧结果；获得接受ID后报告started，不记录输入 |
+| Explain IPC | 主frame授权、问题校验；视觉还需用户确认及当前可信快照 | 拒绝未授权/失效请求不调用客户端，也不伪造流摘要 |
+| AiRequests准备 | 配置/Key/DNS准备后再次检查取消、快照、目的地 | 准备失败一条stage=prepare固定错误；未开始HTTP时status=null |
+| HTTP发起 | 等待一次POST，无自动重试；200后读取body | status记录已知整数；取流前异常stage=http；不记录响应体/请求头 |
+| HTTP 200后读失败/正文后断网 | network，stage=sse，DONE=false | 已发正文保留，Renderer error且可复制；不会冒充正常完成 |
+| 正文后损坏JSON | badResponse，计入已处理SSE事件 | 不跳过损坏帧；部分正文保留；不输出原始帧 |
+| stop + DONE + 正文 | 成功done | finishReason=stop/DONE=true；协议完成不能证明语义完整 |
+| length + DONE | outputLimit，保留正文并显示上限提示 | UI done但有明确warning；诊断outputLimited=true/errorCode=outputLimit |
+| 正文 + DONE但无finish_reason | 有意保留的兼容成功 | finishReason=null明确可见；不能推断模型结束原因，不新增严格拒绝 |
+| 正文EOF/只有finish但没有DONE | badResponse | DONE=false，不把读到EOF当作健康结束；不丢已显示正文 |
+| 未知finish_reason | other + badResponse | 后续stop不能覆盖other；不打印服务端任意reason字符串 |
+| idle/total等待超时 | timeout，区分timeoutKind | 原默认30s/180s未变；取消底层等待；假时钟验证，无固定sleep掩盖 |
+| Stop/Close/替换请求 | aborted + allowlisted cancelSource | 本地ID隔离迟到事件；Close IPC即取消，不等原生closed |
+| Result → IPC | 一个done或固定code error，sink结束generating | main只转发当前活跃ID，第一个终止封口，后续事件丢弃 |
+| IPC → Renderer | 先缓存invoke前早到事件，再按ID应用；进入done/error | 回报实际state、正文UTF-16长度、sendDisabled/stopVisible；测试验证退出generating |
+| Renderer无终态回报/提前销毁 | 终态未知，不能补写done | stream摘要与UI回报按id关联；缺失回报是观测缺口/销毁边界，不能猜服务商行为 |
+| 模型自行短答或提前自然结束 | 可能仍为stop+DONE | 仅凭协议元数据不能判断是否满足用户问题；语义需用户检查 |
+
+### C. 输出预算与官方协议核查
+
+本轮阅读[官方Chat Completions文档](https://docs.bigmodel.cn/api-reference/模型-api/对话补全)、
+其官方Markdown/OpenAPI展开版（同路径加.md）、[核心参数](https://docs.bigmodel.cn/cn/guide/start/concept-param#max_tokens)
+和[流式消息](https://docs.bigmodel.cn/cn/guide/capabilities/streaming)，仅文档GET，无认证、无模型API。
+max_tokens限制生成输出而不包含输入；官方参数表列出glm-5.3-flash支持此参数，视觉schema亦列出该模型。
+流式文档区分delta.content和reasoning_content，finish_reason位于末chunk，并以data: [DONE]结束。
+官方展开schema解释stop为自然结束/停止词，length为token长度限制；还列出工具、安全、模型推理异常等原因。
+客户端继续将不支持的reason归other/badResponse，不把服务端network_error冒充本地传输network。
+
+应用文字/视觉回答都显式使用1024，设置连接测试为1；模型文档默认值不会覆盖显式预算。
+Mock已验证1024随请求发出以及length+DONE、stop+DONE、无reason+DONE、正文无DONE的不同UI结果。
+length+DONE可证明服务报告达到token长度限制；没有真实usage不能声称历史正文恰好用了1024 token，
+也不能推断本次思考/可见正文预算分配。未提高预算、改变思考参数、自动续写或重试。
+
+### D. 本轮实际自动化与原生证据
+
+| 命令 | 退出码 | 本轮结果 |
+|---|---|---|
+| npm run typecheck | 0 | PASS；最终生产修复后执行 |
+| npm run build | 0 | PASS；五个独立preload，无shared preload chunk |
+| npx vitest run | 0 | PASS；81文件1341项，原有测试未删除 |
+| npm run test:helper | 0 | PASS；542 passed/0 failed；finally恢复CL，helper源码未改 |
+| node tools/vision-smoke.cjs | 0 | PASS；Windows合成桌面，沙箱preload、轮盘、预览、Stop/复制、outputLimit；捕获作用域外部请求/文件写入0 |
+| node tools/vision-ai-smoke.cjs | 0 | PASS；6次Mock，单/双图精确批准字节、纯文字无图、取消/迟到隔离；外部请求0 |
+| node tools/settings-input-smoke.cjs | 0 | PASS；实际Fluent合成输入，5次保存，AI调用0 |
+| node tools/window-resize-smoke.cjs | 0 | PASS；5956px/s，旧配置45283白像素，修复配置0；单窗口DWM仍有效 |
+| node tools/clipboard-smoke.cjs（第1轮） | 0 | PASS；33场景、30合成回答、0失败、外部请求0 |
+| node tools/clipboard-smoke.cjs（第2轮） | 0 | PASS；33场景、30合成回答、0失败、外部请求0 |
+| node tools/ai-diagnostics-smoke.cjs | 0 | PASS；实际sandbox卡片/preload/IPC/createExplainAsk/AiRequests/runChat；8次Mock、外部请求0 |
+
+原生诊断8场景：stop+DONE、length+DONE、正文+DONE无reason、正文EOF、正文后network、正文后损坏JSON、Stop、Close。
+全部得到唯一stream摘要和对应ID的已应用UI回报；Stop/Close的迟到DONE不复活请求。文字路径使用实际生产入口；
+双图集成测试同样复用createExplainAsk，逐字节核对可信图片并核对SSE→UI摘要。开关关闭、packaged强制关闭、
+观察器抛错不影响请求、外部/旧ID/重复/额外字段报告拒绝均有定向验证。
+这证明本地真实调用链可观测，不冒充真实智谱HTTP响应或实际请求抓包。
+
+新增原生脚本初期有夹具错误：漏传页面服务参数、连续重开窗口未等销毁；随后使用同一实际卡片串行运行并保留
+有界等待/固定阶段失败信息。中途失败不计PASS；最终退出0。Close取消空隙则另有独立RED→GREEN产品回归，二者分开。
+本轮也按仓库要求以诊断默认关闭启动npm run dev，main/preload和本机renderer服务启动成功；不输入/发送AI问题。
+随后经本项目托盘正常退出，开发进程退出0；未强杀、切换分支或更改用户配置。
+
+Clipboard：用户明确同意测试期间不使用剪贴板后，保留原33场景，有限串行运行2轮，共66场景、60个合成回答、0失败。
+Windows 11 build26100、当前显示器125%、Electron44.5.1、生产sandbox renderer；每次读取前写入已知种子，未读旧剪贴板。
+验证正文快照、await写入完成再读取、清空旧提示、CRLF/Unicode/长文、焦点丢失、两种外部写入顺序、重复点击、
+回答替换时的在途复制与立即关闭。外部写入在本应用提交后可以合法覆盖；不是本应用能永久占有剪贴板。
+没有无限循环、自动复制重试或后台占用，未记录真实剪贴板历史。测试结束后可正常使用剪贴板。
+合成检查仍不能证明历史无换行answerCopyMismatch的唯一根因。当前未复现，不标记历史事件已修复。
+
+### E. Git与边界
+
+相对fed5cb4的本轮完整修改清单（13修改、3新增、0删除；未暂存）：
+
+```text
+M docs/design.md
+M docs/p2a-3-validation.md
+M src/main/aiClient.ts
+M src/main/aiRequest.ts
+M src/main/explainWindow.ts
+M src/main/index.ts
+M src/preload/explain.ts
+M src/renderer/explain/main.ts
+M src/shared/ipc.ts
+M tests/main/aiRequest.test.ts
+M tests/main/aiTermination.test.ts
+M tests/main/explainWindow.test.ts
+M tests/renderer/explainMain.test.ts
+A src/main/aiDiagnostics.ts
+A tests/main/aiDiagnostics.test.ts
+A tools/ai-diagnostics-smoke.cjs
+```
+
+out/p2a3-stream-audit只保留本轮合成smoke元数据，不加入提交；无真实图片/回答/秘密。Hook、windowsFrame白边修复、
+KeyStore、Quick Actions、lock/依赖、HTTPS/DNS/TLS和截图确认策略未改。未关闭sandbox/contextIsolation。
+本轮仅新增受主frame/ID/shape约束的开发诊断IPC，无任意clipboard写入能力。建议下一次获得交付授权后，以
+fix(ai): wire safe stream diagnostics and cancel on close追加到PR #5，不覆盖既有提交；本轮不执行Git写操作。
+最终安全扫描覆盖16个修改/新增文件全文：服务商Key形态、长sk-token、私钥、实际Bearer字面量、内嵌长图片匹配0，
+无大于512KiB的意外文件、受保护路径改动0；git diff --check退出0。模式扫描不代替源码审查，也不保证识别所有秘密格式。
+最终HEAD仍为fed5cb483b6d7b08d8dbbc861ce2633b20d6fa8a，13修改/3新增/0删除/0暂存；本轮增量均留在该工作区。
+
+### F. 零 API 阶段决策与单次真实验收准备
+
+CODE GATE: PASS
+
+SSE DIAGNOSTIC READINESS: PASS（本地真实入口+合成流；真实服务验证尚未执行）
+
+CLIPBOARD STABILITY: PASS（本轮66个合成场景；历史根因仍INCONCLUSIVE）
+
+REAL GLM ACCEPTANCE: NOT TESTED（本轮真实请求0）
+
+PR #5 MERGE READINESS: PENDING INVESTIGATION ACCEPTANCE（保留OPEN，不合并；本轮增量尚未提交/推送）
+
+历史GLM中途结束和answerCopyMismatch不可追溯；没有发现尚未修复的确定性P0/P1。新一轮真实终止和复制仍NOT TESTED，
+真实Stop/Retry、非Windows视觉实机、多屏/其他DPI仍NOT TESTED。DNS预解析不固定实际连接地址、截图同步/受保护全屏
+内容和外部剪贴板软件限制继续保留。
+
+下一步先申请新的单次明确授权（可能计费），获准后才能启用本地开发诊断并沿用现有GLM配置，不读取Key文件。
+由用户打开无隐私的人工测试画面，Alt拖动问号→本地预览，保持默认局部图；只点击一次发送，问题为：
+“请描述局部截图，列出8条简短观察，最后写‘检查结束’。看不清就说明，不要猜测。”
+不点测试连接、不重试、不自动续写；采集上述固定摘要，不抓包、不保存真实图片/答案。结束后用户点击复制，
+在记事本核对可见回答，仅报告一致与否。按同一id核对HTTP/SSE/reason/DONE/outputLimit/timeout/cancel/UI，
+缺记录则继续查本地链路，不推断服务商。一次未覆盖目标时不追加第二次请求。
+
+LOCAL DIAGNOSTICS READY — REAL API VERIFICATION REQUIRES USER APPROVAL
+
+### G. 单次授权后的真实终止验收（2026-10-25）
+
+本节更新F节之后的进展，不回写零API阶段及更早历史结论。用户新近明确授权最多1次，由用户本人手动发送。
+以LOLPING_AI_DIAGNOSTICS=1启动当前开发工作区，沿用现有GLM配置；未读取或打印Key，未开启调试端口。
+测试方案为默认局部截图，用户经应用界面手动发送；没有由代理调用模型API、测试连接、自动重试或续写。
+本次观测到1个真实vision请求（本地id=2），请求预算已用完。未抓取请求体，不将诊断摘要当成抓包证据。
+域名/模型核对在用户界面操作步骤中要求；摘要设计不包含目的地身份，本节不声称独立抓包核验了服务商/模型。
+
+同一本地id的实际脱敏证据：
+
+| 观测点 | 实际记录 |
+|---|---|
+| Renderer开始 | phase=started，state=generating，characters=0，sendDisabled=true，stopVisible=true |
+| 客户端阶段/HTTP | mode=vision，stage=sse，httpStatus=200 |
+| 已处理事件 | sseEvents=1009，deltaCount=248，characters=393（可见正文UTF-16单位） |
+| 服务终止 | finishReason=length，doneSeen=true，outputLimited=true |
+| 错误/取消/超时 | errorCode=outputLimit，aborted=false，cancelSource=null，timeoutKind=null |
+| 总耗时 | elapsedMs=22364（含准备） |
+| Renderer最终 | phase=terminal，state=done，characters=393，sendDisabled=false，stopVisible=false |
+| 用户界面 | 用户报告看到输出token上限警告，部分回答保留；未完成所要求的完整观察列表/结尾 |
+| 真实复制 | PASS（用户点击应用复制并在记事本核对，明确报告“复制一致”；不是代理读取真实剪贴板后的自动断言） |
+
+结论：本次服务明确报告token长度限制，并以DONE终止；客户端显示上限警告，保留部分正文且退出generating。
+已观察到的终止不属于本地network/idle timeout/total timeout/用户取消，UI没有一直停在生成状态。
+客户端和Renderer的393单位长度一致，是已显示长度的证据，不是逐字抓包核对或独立语义完整性证明。
+事件总数包括非可见内容及终止事件；未逐帧记录内容，不能将1009与248的差额全部归因于思考事件或正文丢失。
+仍保持请求max_tokens=1024；没有采集usage，不能声称精确输出token计数或思考与可见正文的预算占比。
+本次已定位的输出上限不能推断为更早不可追溯截断事件的原因。
+
+本节仅保存固定状态、计数和用户核对结论。用户回复中附带的真实正文未复制进仓库、诊断文件或测试夹具；
+不保存截图、答案、Key、请求头或完整服务端响应。真实API总数1，不增加第二次请求。
+本次诊断进程在证据读取完毕后通过本项目托盘正常退出，开发开关仅设于该子进程，不写入用户配置。
+正文复制核对之后没有再进行系统剪贴板测试或写入，合成66场景结果仍引用D节，未伪称本轮重新跑过。
+本阶段没有改生产代码或测试代码；1341项Vitest、542项helper、构建及各smoke引用前一阶段实际执行结果。
+
+CODE GATE: PASS（前一阶段结果，代码未再改动）
+
+SSE DIAGNOSTIC READINESS: PASS（本地链路与本次真实请求都收到同id的终止及已应用UI回报）
+
+CLIPBOARD STABILITY: PASS（66个合成场景；另有本次真实复制用户核对PASS；历史根因仍INCONCLUSIVE）
+
+REAL GLM ACCEPTANCE: PASS（单图返回、length+DONE分类、退出生成和用户复制核对；不表示回答完整）
+
+PR #5 MERGE READINESS: READY FOR INCREMENTAL REVIEW（本轮修复仍未提交/推送；不授权或执行合并）
+
+REAL DUAL IMAGE: NOT TESTED（本次未补测）
+
+REAL COPY: PASS（本次用户核对）
+
+REAL STOP: NOT TESTED
+
+REAL RETRY: NOT TESTED
+
+非Windows视觉实机、多显示器/其他DPI仍NOT TESTED；历史事件根因和既有DNS/截图同步/外部剪贴板竞争限制保留。
+如需要更长回答，应另行审议输出预算设置；本轮不擅自提高1024或自动续写。
+
+### H. 用户后续授权：可调8192预算与回车提交（2026-10-25）
+
+G节验收后，用户提出输出上限及问题框无法回车提交，并明确选择“设置中可调，默认8192 token”。
+这是新的产品调整授权，取代前一排障阶段保持1024的约束；不授权额外付费调用或Git提交/合并。
+G节真实length+DONE及393正文单位是在旧1024预算下取得，不能拿来证明8192预算的真实服务效果。
+
+实现：
+
+- Settings → Features → AI新增“输出token上限”，可选1024/2048/4096/8192/16384，默认8192。
+  src/shared/aiConfig.ts:24集中定义选项和归一化；settings.ts对旧配置补默认值，对非法/不支持值回退8192。
+  不改变已有地址、模型、Key存储或其他设置。中英文说明提示较高预算可能增加费用，服务商及本地限制仍适用。
+- createExplainAsk从主进程设置读取当前预算，提交时冻结，文字/视觉共用；设置变化影响下一次提交。
+  连接探测仍为1 token，无自动续写/重试，原20,000正文单位、idle/total等保护未放宽。
+- src/renderer/explain/submitKey.ts统一单行问题框的Enter行为；main.ts和visionPreview.ts均接入。
+  输入法确认（isComposing/Windows229）、repeat及组合键不发送。预览Enter调用原submit，保留图片加载、
+  过期、scope、可信快照及confirmed检查；不会因键盘操作静默重拍或扩大上传范围。不修改全局Hook。
+
+RED→GREEN：四条断言先失败，分别观察到默认预算仍1024、设置缺预算字段、文字Enter和视觉Enter均未调用发送。
+修复后回归通过；视觉用例同时验证未加载/输入法/repeat/过期不发送，重复Enter只消费一次已确认快照。
+
+| 本次重新执行 | 退出码 | 证据 |
+|---|---|---|
+| npm run typecheck | 0 | PASS |
+| npm run build | 0 | PASS；五个独立preload，未生成共享preload chunk |
+| npx vitest run | 0 | PASS；81文件1344项 |
+| npm run test:helper | 0 | PASS；542 passed/0 failed；finally恢复CL |
+| node tools/settings-input-smoke.cjs | 0 | PASS；实际Fluent组件、6次合成保存；默认8192→选择4096→页面重新加载后仍为4096；AI调用0 |
+| node tools/ai-diagnostics-smoke.cjs | 0 | PASS；9次Mock均实际检查max_tokens=8192；真实sandbox卡片+原生Enter事件覆盖文字和局部图发送 |
+| node tools/vision-ai-smoke.cjs | 0 | PASS；6次Mock，精确单/双图、文字无图片、取消与迟到隔离，外部请求0 |
+
+原生Enter视觉检查只使用预置可信合成JPEG，不捕获/写入真实屏幕；请求中精确核对仅有批准的1张图片。
+设置与客户端Mock证明配置保存/传递，不冒充8192预算真实模型验收。未额外运行会覆盖系统剪贴板的smoke，
+不覆盖用户刚核对的真实复制内容；66场景和白边实测仍引用前一阶段结果。更新版随后以诊断关闭方式npm run dev启动，
+供用户使用设置和键盘操作；代理没有发送问题。本次额外真实API请求0，整个受控真实阶段累计仍1。
+
+相对fed5cb4完整工作区清单更新为21修改、4新增、0删除、0暂存（25文件）：
+
+```text
+M docs/design.md
+M docs/p2a-3-validation.md
+M src/main/aiClient.ts
+M src/main/aiRequest.ts
+M src/main/explainWindow.ts
+M src/main/index.ts
+M src/preload/explain.ts
+M src/renderer/explain/main.ts
+M src/renderer/explain/visionPreview.ts
+M src/renderer/settings/components/AiConfigSection.tsx
+M src/shared/aiConfig.ts
+M src/shared/i18n.ts
+M src/shared/ipc.ts
+M src/shared/settings.ts
+M tests/main/aiRequest.test.ts
+M tests/main/aiTermination.test.ts
+M tests/main/explainWindow.test.ts
+M tests/renderer/explainMain.test.ts
+M tests/renderer/visionPreview.test.ts
+M tests/shared/settings.test.ts
+M tools/settings-input-smoke.cjs
+A src/main/aiDiagnostics.ts
+A src/renderer/explain/submitKey.ts
+A tests/main/aiDiagnostics.test.ts
+A tools/ai-diagnostics-smoke.cjs
+```
+
+CODE GATE: PASS（本节列出的本轮门禁）
+
+REAL 8192 BUDGET: NOT TESTED
+
+原有1次真实终止与用户复制证据保留，真实Stop/Retry、真实双图复验及多平台/多屏范围不扩张。
+本轮增量仅供审查与本机使用，未commit/push/merge，不把旧22文件暂存白名单套用于当前25文件改动。
+最终安全复核覆盖25文件，敏感模式命中0；Hook、KeyStore、windowsFrame、visionSnapshot、依赖与lock改动0，
+git diff --check退出0，HEAD仍为fed5cb483b6d7b08d8dbbc861ce2633b20d6fa8a。
+
+### I. 最终提交前复核与增量交付准备（2026-10-26）
+
+按用户最新授权，先完成8192配置与Enter回归、最终差异审查，再提交同一功能分支、推送并更新PR #5，检查三平台CI。
+本节是提交前快照；新提交SHA、推送和CI结果由忽略的out/p2a3-increment-delivery交付记录及最终答复记录，不为自引用追加提交。
+提交前HEAD仍为fed5cb483b6d7b08d8dbbc861ce2633b20d6fa8a；PR #5核实为OPEN、非合并、源分支相同且指向该旧SHA。
+
+独立Standards/Spec初审识别两项证据缺口（磁盘重启恢复、IME原生表单旁路）及当前设计文档的两处旧表述。
+设置恢复测试现使用独立合成目录：旧配置缺字段→load得到8192→flush落盘→新建SettingsStore再次load恢复8192；
+随后保存4096/16384并分别重建存储，实际createExplainAsk→AiRequests→Mock HTTP请求的max_tokens依次8192/4096/16384，
+连接探测仍为1。原地址、模型和其他设置字段保持，非法值及允许边界继续由归一化回归覆盖。
+
+IME原生复现确认了新的确定性缺陷：compositionstart=1、compositionend=0、可信Enter的isComposing=true，
+keydown快捷处理已跳过，但普通问题框原生form仍触发submit=1并发起1次Mock请求。
+定向单元测试同样RED；修复main.ts的composition生命周期和隐式submit锁存，直到新的明确按键/按钮操作才解锁。
+隐式候选click（detail=0、焦点仍在问题框）不解除阻止；实际指针点击或按钮焦点下的键盘激活可以恢复。
+预览问题框也跟踪composition生命周期，仍经原有sendState/submit授权检查发送。没有修改Hook或增加全局快捷键。
+
+修复后实际Chromium合成composition及可信Enter序列GREEN：普通框仍观测到form默认事件，但不产生请求；
+截图框候选确认无请求；compositionend后Enter或明确鼠标点击可以提交。长按Enter及模型生成中重复Enter不追加请求。
+该工具仅在隔离的合成卡片上使用Electron进程内调试协议输入通道，不开放调试端口，不附加实际应用或启用Network域。
+它验证Chromium输入事件及默认表单行为，不冒充用户物理操作系统输入法候选窗口验收。截图路径精确核对1张可信合成JPEG，
+不读真实屏幕、Key或剪贴板，未扩大上传scope；主进程独立同意/会话/快照校验保留。
+
+修正文档中的“只能点击发送”及“没有新增设置”表述。第一次修复后子代理复审曾因额度中断，不计作通过；恢复后重新完成
+两项独立只读终审：Standards 0项可行动发现；Spec 0项可行动发现。主代理另行检查全部差异与新增文件。
+
+本轮最终实际执行（不是重复引用H节）：
+
+| 门禁 | 退出码 | 结果 |
+|---|---|---|
+| npm run typecheck | 0 | PASS |
+| npm run build | 0 | PASS；五个独立preload，无共享chunk |
+| npx vitest run | 0 | PASS；81文件1345项，新增IME form旁路RED→GREEN |
+| npm run test:helper | 0 | PASS；542 passed/0 failed，finally恢复CL |
+| node tools/settings-input-smoke.cjs | 0 | PASS；6次合成保存，实际Fluent设置控件与重新加载恢复 |
+| node tools/ai-diagnostics-smoke.cjs | 0 | PASS；10次Mock、外部请求0；composition、长按、生成中Enter、明确按钮、批准局部图、length提示与UI终态 |
+| node tools/vision-ai-smoke.cjs | 0 | PASS；6次Mock、外部请求0；单/双图批准字节、文字无图、取消与迟到隔离 |
+| npm run dev | 0（正常托盘退出） | PASS；Windows启动main/preload/renderer，诊断关闭，没有提交模型问题 |
+
+本轮不重新占用系统剪贴板；Clipboard 66场景及白边/本地capture实机合成结果仍为此前阶段证据，未假称重新执行。
+本轮真实模型请求0；G节旧1024预算下单次真实length+DONE及用户复制核对PASS保留。真实8192、双图复验、真实Stop/Retry、
+非Windows视觉实机及其他DPI/多屏继续NOT TESTED；不将它们自动等同于代码阻塞，也不把历史不可追溯根因改为已确认。
+
+本次仍恰好H节列出的25个文件（21修改/4新增/0删除），未加入其他工作区、out、Key、截图、日志或构建产物。
+新增白名单out/p2a3-increment-delivery/staging-allowlist.txt只用于这25个文件，取代旧22文件交付白名单；
+该25是相对fed5cb4的增量数量，不是声称整个PR只包含25个文件。暂存前/后分别核对精确路径、敏感模式、大小和diff --check。
+native Hook、KeyStore、windowsFrame、visionSnapshot、依赖/lock保持未改；保留sandbox、TLS/DNS/HTTPS、上传确认及已有稳定性修复。
+
+CODE GATE: PASS
+
+FINAL DIFF REVIEW: PASS
+
+GO FOR INCREMENTAL COMMIT（推送和PR新head CI仍以实际执行后的记录为准；不合并）

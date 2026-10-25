@@ -523,15 +523,16 @@ discards late preparation results. `node tools/window-resize-smoke.cjs` compares
 using injected native drags at about 6000 horizontal pixels per second and in-memory edge samples. It proves an OS
 reproducer, not a physical user gesture or every GPU/DPI configuration. Images are never written to disk.
 
-The preview stays local until the user clicks **Send selected screenshots and ask**. Local crop is the default;
+The preview stays local until the user explicitly confirms using **Send selected screenshots and ask**, or Enter
+in the reviewed screenshot question field. Local crop is the default;
 including the full monitor requires a separate checkbox. The card names the image count and scope, recipient domain
 and model, and asks the user to check personal information before sending. The original Ask button always sends a
 plain string and never inherits images. Both modes share the same guarded `streamChat` client and encrypted key.
-No new host, setting, key store or preload entry is added.
+No new host, key store or preload entry is added.
 
 An SSE `finish_reason: length` followed by `[DONE]` now reports an output-limit warning while keeping visible partial
 text available to copy. Missing `[DONE]` still fails as an incomplete stream; the one-token connectivity probe still
-accepts an empty completion. No automatic continuation, larger token budget or retry is introduced. The main process
+accepts an empty completion. No automatic continuation or retry is introduced. The main process
 retains a card once it has received visible text, including after Stop or an error, so moving focus does not discard
 the partial answer. This handling does not establish the cause of a real answer truncation without its terminal event.
 
@@ -540,7 +541,34 @@ The P2A-3 termination audit also rejects malformed JSON event payloads and expli
 remain compatible with providers that terminate with `[DONE]` alone. Main forwards events only while that request
 is generating, so its first terminal event seals the stream. A local injected `onDiagnostic` observer can receive one
 frozen metadata summary (counts, normalized finish category, HTTP status, DONE/abort/error flags and elapsed time).
-The ordinary app does not install this observer; there is no diagnostic IPC, persistent log or new renderer permission.
+The observer is off by default. A developer can explicitly launch with `LOLPING_AI_DIAGNOSTICS=1`; packaged builds
+ignore the switch. `index.ts` and integration checks share `createExplainAsk`, which forwards the observer through
+`AiRequests` and `runChat`. Preparation failures also yield one summary, without inventing an HTTP response. Counts
+include processed SSE data events (including DONE), visible deltas/UTF-16 units, idle versus total watchdog expiry,
+and allowlisted cancellation sources. Elapsed time includes preparation.
+
+In this opt-in mode the explain renderer acknowledges started/terminal/Stop/Close states over one metadata-only IPC.
+Main checks the owning main frame, accepted request ID, exact field shape, bounded counts and fixed enums, and accepts
+each phase at most once per request. Old/foreign/extra-field reports are dropped. The acknowledgement reports applied
+UI state and send/Stop button state; it is not inferred from the client result. A missing acknowledgement remains
+unknown (for example, renderer destruction before an invoke reply), never a presumed successful completion.
+The console receives only selected metadata fields under `[ai-diagnostic]`. There is no file logger, upload or port;
+the host terminal itself may retain console output. No question, answer, URL, screenshot, key, headers, raw provider
+message or arbitrary AbortSignal reason is logged. Settings connection probes do not install the observer.
+Authorized Close IPC cancels immediately and invalidates old events before native window destruction, which can lag.
+`node tools/ai-diagnostics-smoke.cjs` exercises the actual sandbox card/preload/IPC and this app entry with synthetic
+preparation and byte streams. It makes no real API request and does not access the key store or clipboard.
+
+The AI settings now offer an output token budget of 1024, 2048, 4096, 8192 or 16384, defaulting to 8192 as requested
+after the controlled real request reported `length`. Older settings acquire this default; invalid values normalize
+to it. Main freezes the selected budget when accepting each text or vision ask. A changed setting affects the next
+request, and the connection probe remains capped at one token. A larger budget can cost more and does not override
+the provider's limits or the existing 20,000-character/timeout guards. No automatic continuation is added.
+
+Enter submits in both single-line question fields. The preview field uses exactly the same reviewed-snapshot path
+as its send button; keyboard submission cannot bypass image readiness, expiry, selected scope or confirmation.
+IME confirmation (`isComposing` or Windows keyCode 229), held Enter and modified Enter do not submit. Main's existing
+IDs and the busy state still reject duplicate or stale events. There is no global hook or shortcut change.
 
 Copy snapshots the visible answer and its request epoch. One clipboard operation may be in flight per card, including
 when a new answer replaces the old one. Each click clears earlier feedback; only a completion for the current answer
