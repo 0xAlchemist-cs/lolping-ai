@@ -24,8 +24,8 @@ import { EmoteCache } from './emoteCache';
 import { EmoteLibrary, resolveEmoteArt } from './emoteLibrary';
 import { EmoteTransfer } from './emoteTransfer';
 import { checkEndpoint, guardResolvedAddresses, isExplicitLoopback, validModel, type AiErrorCode } from '../shared/aiConfig';
-import { closeExplainWindow, openExplainWindow, registerExplainWindow } from './explainWindow';
-import { AiError, pingEndpoint, streamChat } from './aiClient';
+import { closeExplainWindow, openExplainWindow, registerExplainWindow, type VisionUpload } from './explainWindow';
+import { AiRequests } from './aiRequest';
 import { AiKeyStore } from './aiKeyStore';
 import { captureVision } from './visionCapture';
 import { withCaptureWindowsHidden } from './captureWindows';
@@ -361,18 +361,15 @@ function start(): void {
   const aiAllowLocal = !app.isPackaged && process.env.LOLPING_AI_ALLOW_LOCALHOST === '1';
   const aiConfigured = (): boolean =>
     featureOn(settings, 'aiExplain') && settings.aiBaseUrl.length > 0 && settings.aiModel.length > 0 && aiHasKey;
-  let aiAbort: AbortController | null = null;
-  const aiCancel = (): void => {
-    aiAbort?.abort();
-    aiAbort = null;
-  };
+  const aiCancel = (): void => aiRequests.cancel();
   /** Everything checked before any bytes leave: endpoint shape, model, key, and the DNS answer for the host. */
   async function aiPrepare(): Promise<
     { ok: true; baseUrl: string; model: string; key: string } | { ok: false; code: AiErrorCode }
   > {
     const endpoint = checkEndpoint(settings.aiBaseUrl, aiAllowLocal);
+    const model = settings.aiModel.trim();
     if (!endpoint.ok) return { ok: false, code: endpoint.code === 'privateAddress' ? 'private' : 'endpoint' };
-    if (!validModel(settings.aiModel)) return { ok: false, code: 'endpoint' };
+    if (!validModel(model)) return { ok: false, code: 'endpoint' };
     const key = await aiKeys.get();
     if (!key) return { ok: false, code: 'noKey' };
     if (!aiAllowLocal || !isExplicitLoopback(endpoint.endpoint.host)) {
@@ -380,46 +377,33 @@ function start(): void {
         lookup(host, { all: true }));
       if (!guard.ok) return { ok: false, code: guard.code === 'privateAddress' ? 'private' : 'resolve' };
     }
-    return { ok: true, baseUrl: endpoint.endpoint.url, model: settings.aiModel.trim(), key };
+    return { ok: true, baseUrl: endpoint.endpoint.url, model, key };
   }
+  const aiRecipient = (): { baseUrl: string; model: string } | null => {
+    const endpoint = checkEndpoint(settings.aiBaseUrl, aiAllowLocal);
+    return aiConfigured() && endpoint.ok && validModel(settings.aiModel)
+      ? { baseUrl: endpoint.endpoint.url, model: settings.aiModel.trim() } : null;
+  };
+  const aiRequests = new AiRequests({ prepare: aiPrepare, recipient: aiRecipient,
+    fetchImpl: (url, init) => globalThis.fetch(url, init), now: Date.now });
   async function aiRun(
     question: string,
     maxTokens: number,
     onDelta: ((t: string) => void) | null,
+    upload?: VisionUpload,
   ): Promise<{ ok: true } | { ok: false; code: AiErrorCode }> {
-    const ready = await aiPrepare();
-    if (!ready.ok) return ready;
-    const controller = new AbortController();
-    aiCancel(); // an explicit new request replaces any old one
-    aiAbort = controller;
-    try {
-      await streamChat({
-        baseUrl: ready.baseUrl,
-        model: ready.model,
-        key: ready.key,
-        question,
-        signal: controller.signal,
-        fetchImpl: globalThis.fetch,
-        now: Date.now,
-        maxTokens,
-        onDelta: onDelta ?? (() => undefined),
-      });
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, code: err instanceof AiError ? err.code : 'network' };
-    } finally {
-      if (aiAbort === controller) aiAbort = null;
-    }
+    return aiRequests.run(question, maxTokens, onDelta, upload);
   }
   registerExplainWindow({
-    ask: (question, id, sink) => {
-      void aiRun(question, 1024, (t) => sink({ kind: 'delta', id, text: t }))
+    ask: (question, id, sink, upload) => {
+      void aiRun(question, 1024, (t) => sink({ kind: 'delta', id, text: t }), upload)
         .then((r) => sink(r.ok ? { kind: 'done', id } : { kind: 'error', id, code: r.code }));
     },
     cancel: aiCancel,
     configured: aiConfigured,
     openSettings: () => openSettingsWindow('features'),
     capture: (target) => withCaptureWindowsHidden(() => captureVision(target)),
+    recipient: aiRecipient,
   });
   room.on('remoteEmote', (p) => {
     if (featureOn(settings, 'emotes')) overlays.spawnRemoteEmote(p);

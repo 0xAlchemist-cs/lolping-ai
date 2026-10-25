@@ -271,6 +271,27 @@ function runElectron() {
         check(overlay.isVisible() && card.isVisible(), 'windowsNotRestored');
         check(await evaluate('document.getElementById("visionPrivacy").textContent') === words.vision.privacy,
           'privacyLabelMissing');
+        check(card.isResizable() && card.isMaximizable(), 'windowResizeUnavailable');
+        check(await evaluate('getComputedStyle(document.querySelector(".titlebar")).webkitAppRegion === "drag"'
+          + ' && getComputedStyle(document.getElementById("close")).webkitAppRegion === "no-drag"'), 'windowDragRegionBroken');
+        const originalCardSize = card.getSize();
+        const originalLabels = await evaluate('({ selection:document.getElementById("visionSelection").textContent,'
+          + 'destination:document.getElementById("visionDestination").textContent })');
+        // Exercise wrapping without an endpoint, key or upload: these are synthetic layout labels only.
+        const longDestination = `${words.vision.destination} ${'a'.repeat(50)}.example / ${'m'.repeat(100)}`;
+        await evaluate(`document.getElementById("visionSelection").textContent=${JSON.stringify(words.vision.selectedBoth)};`
+          + `document.getElementById("visionDestination").textContent=${JSON.stringify(longDestination)}`);
+        for (const [width, height] of [[400, 360], [560, 600], [900, 700]]) {
+          card.setSize(width, height);
+          await waitForPaint(card);
+          check(await evaluate('(() => { const r=document.getElementById("visionSend").getBoundingClientRect();'
+            + 'return r.top>=0 && r.bottom<=innerHeight && r.left>=0 && r.right<=innerWidth })()'),
+          'consentControlsClipped');
+        }
+        card.setSize(...originalCardSize);
+        await evaluate(`document.getElementById("visionSelection").textContent=${JSON.stringify(originalLabels.selection)};`
+          + `document.getElementById("visionDestination").textContent=${JSON.stringify(originalLabels.destination)}`);
+        await waitForPaint(card);
         const markers = await evaluate('({ local: {x:document.getElementById("visionLocalMarker").style.left,'
           + 'y:document.getElementById("visionLocalMarker").style.top}, full: {'
           + 'x:document.getElementById("visionFullMarker").style.left,'
@@ -300,12 +321,17 @@ function runElectron() {
           'staleSessionCaptured');
         await evaluate('document.getElementById("question").value="synthetic smoke";'
           + 'document.getElementById("ask").requestSubmit()');
-        await waitUntil(() => pendingAnswer && evaluate('!document.getElementById("send").disabled'), 'textAskMissing');
+        await waitUntil(() => pendingAnswer && evaluate('document.getElementById("send").disabled'), 'textAskMissing');
         pendingAnswer.sink({ kind: 'delta', id: pendingAnswer.id, text: 'Synthetic ' });
         pendingAnswer.sink({ kind: 'delta', id: pendingAnswer.id, text: 'answer' });
         pendingAnswer.sink({ kind: 'done', id: pendingAnswer.id });
         await waitUntil(() => evaluate('document.getElementById("body").textContent === "Synthetic answer"'
           + ' && !document.getElementById("copy").disabled'), 'textStreamingBroken');
+        await evaluate('document.getElementById("copy").click()');
+        await waitUntil(() => evaluate(`document.getElementById("copied").textContent === ${JSON.stringify(words.copied)}`),
+          'answerCopyFailed');
+        const copiedAnswer = await clipboard.readText();
+        check(copiedAnswer === 'Synthetic answer', 'answerCopyMismatch');
         pendingAnswer = null;
         const cancelsBefore = cancels;
         await evaluate('document.getElementById("ask").requestSubmit()');
@@ -317,7 +343,8 @@ function runElectron() {
         await waitUntil(() => settingsOpened > 0, 'settingsActionBroken');
         results.push({ ...lastCapture, scaleFactor: display.scaleFactor, movedCursor,
           sandboxPreloads: 'PASS', syntheticWheelAndPing: 'PASS', exclusionAndRestore: 'PASS',
-          imageRelease: 'PASS', textStreamAndStop: 'PASS' });
+          imageRelease: 'PASS', textStreamAndStop: 'PASS', syntheticAnswerCopy: 'PASS',
+          resizableCard: 'PASS', consentControlsVisible: 'PASS' });
         card.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
         await waitUntil(() => card.isDestroyed(), 'escapeDidNotClose');
         overlay.destroy();

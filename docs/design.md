@@ -490,3 +490,70 @@ normal-browser content or restart acceptance, which must be recorded separately 
 References: [Electron desktopCapturer](https://www.electronjs.org/docs/latest/api/desktop-capturer),
 [Electron content protection](https://www.electronjs.org/docs/latest/api/browser-window#winsetcontentprotectionenable-macos-windows),
 [Microsoft DwmFlush](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmflush).
+
+
+### Confirmed image questions (fork, P2A-2, Windows)
+
+The Explain card uses a restrained Hextech panel: dark blue, thin muted gold borders, outlined primary buttons and
+small cyan accents. A compact header replaces large decorative elements. Native window edges resize it; a title-bar
+double-click can maximize and restore it. It opens at 560 × 600 DIPs, bounded to the display work area, with a
+400 × 360 minimum that also shrinks for smaller work areas. These window dimensions do not change the frozen ping
+target or capture coordinates. Text mode explicitly says it sends no screenshots. Images scroll independently above
+the consent panel, so the image scope, destination, privacy notice and send button remain visible while reviewing.
+At wider sizes the local and full previews use two columns. Native resizing needs no additional IPC or preload entry.
+
+The preview stays local until the user clicks **Send selected screenshots and ask**. Local crop is the default;
+including the full monitor requires a separate checkbox. The card names the image count and scope, recipient domain
+and model, and asks the user to check personal information before sending. The original Ask button always sends a
+plain string and never inherits images. Both modes share the same guarded `streamChat` client and encrypted key.
+No new host, setting, key store or preload entry is added.
+
+Main owns one immutable JPEG snapshot (`visionSnapshot.ts`) bound to the Explain/ping session, a generated snapshot
+revision, and the normalized endpoint/model at preview time. It retains at most two JPEGs for 120 seconds. Closing the
+preview/window, a new ping/capture, expiry or consuming consent releases the snapshot. Renderer sends only the session,
+snapshot revision, local/full scope, question and explicit confirmation. Extra fields, foreign frames, stale snapshots,
+changed recipients and removed/changed displays are refused. Sending never captures again. Images are validated as
+canonical JPEG base64, structurally inspected before allocating decoded pixels, and decoded with nativeImage in main;
+metadata must match. Each is at most 3 MiB, both at most 6 MiB and 8 Mi data-URL characters combined, with the existing
+8192-side/32 Mi-pixel bounds. Expiry releases the main snapshot; visible renderer sources are removed on close, send,
+new session and unload. Neither images nor raw provider errors are logged or persisted.
+
+An expired, failed or unapproved preview exposes an explicit Capture again button. This action obtains a fresh
+snapshot and resets the full-monitor checkbox; it never uploads automatically. Image load failures and pending images
+have separate messages. The send button's data-block-reason contains only a fixed local readiness code. A fresh
+main-owned snapshot also updates an obsolete initial configuration flag, so configuring AI while the card is open
+does not require closing the card before a new preview can be sent.
+
+Text content remains a string. Image content is a typed text part followed by one local JPEG and, only when chosen,
+one full-monitor JPEG. The text identifies image order and each original ping position in normalized coordinates:
+the visible crosshair is a CSS overlay and the approved JPEG itself is never recompressed or altered for upload.
+The original URL/DNS/TLS checks and redirect refusal apply to both modes. Consent binds the destination and model;
+a configuration change during asynchronous key/DNS preparation refuses that upload. Cancellation owns its controller
+before those awaits, so Stop/close cannot start a late request after preparation finishes.
+`AiRequests` owns that preparation/cancellation lifecycle for deterministic testing. A consumed approval retains its
+original deadline and a main-owned session/revision guard; both are checked again after preparation, immediately
+before entering the client. Expiry or a replacement capture cannot send the old images after the await. HTTP 413
+maps to the fixed image-limit error without exposing the server body.
+
+The renderer buffers bounded early events while waiting for the IPC request ID, then replays only that ID's text and
+terminal event. A request epoch invalidates pending replies on Stop, close, retry or replacement. Main also discards
+stale IDs. SSE events are bounded and assembled across UTF-8 chunks and multiline fields. Only `delta.content` is
+visible; reasoning is ignored. Completion requires `[DONE]`, not just `finish_reason`; missing termination and empty
+answers fail safely (the one-token connection probe may be empty). Thinking text is cleared on success, error or Stop.
+Known provider business codes map to fixed bilingual categories; e.g. 429 with code 1314 is an expired plan rather than
+a temporary rate error. Response bodies and request headers never reach error messages.
+
+Vision sends consume approval. Retry returns to review without capturing or uploading automatically; the user must
+preview and confirm again. Text retry retains the existing behavior. Closing a preview during a vision stream emits
+an aborted terminal event before invalidation, so both main and renderer leave generating. Copy uses only the visible
+answer body. All Explain commands authorize the owning main frame, and the existing five sandbox preloads load alone.
+
+`node tools/vision-ai-smoke.cjs` runs the actual snapshot/client with synthetic JPEGs and injected SSE bytes. It blocks
+external network/file writes and prints only booleans/counts. It is Mock integration evidence, separate from the real
+Windows desktop smoke and a user-triggered single real visual request. No physical or real-model pass is inferred
+from automated fakes.
+
+References: [GLM-5.3-Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash),
+[Chat Completions](https://docs.bigmodel.cn/api-reference/模型-api/对话补全),
+[streaming](https://docs.bigmodel.cn/cn/guide/capabilities/streaming),
+[provider errors](https://docs.bigmodel.cn/cn/api/api-code).

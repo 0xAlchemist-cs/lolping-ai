@@ -25,7 +25,9 @@ export const MAX_MODEL = 100;
 /** Why a model request failed, as one stable code the UI can name in both languages. */
 export type AiErrorCode =
   | 'auth' | 'rate' | 'server' | 'http' | 'network' | 'timeout' | 'aborted'
-  | 'tooLong' | 'endpoint' | 'private' | 'resolve' | 'noKey' | 'badResponse';
+  | 'tooLong' | 'endpoint' | 'private' | 'resolve' | 'noKey' | 'badResponse'
+  | 'permission' | 'notFound' | 'plan' | 'imageUnsupported' | 'imageInvalid' | 'imageTooLarge'
+  | 'snapshotExpired' | 'snapshotStale' | 'consentRequired' | 'configChanged';
 
 /** True when the string could name a model: 1..MAX_MODEL characters and no control characters. */
 export function validModel(raw: unknown): raw is string {
