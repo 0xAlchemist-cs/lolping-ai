@@ -38,6 +38,8 @@ const vision = new VisionPreview(window.explainApi, {
 }, (request) => { void askRequest(request.question, request); });
 const stopVisionSession = window.explainApi.onVisionSession(setSession);
 window.addEventListener('beforeunload', () => {
+  closed = true;
+  closeAfterCopy = false;
   invalidate();
   stopVisionSession();
   vision.destroy();
@@ -51,6 +53,9 @@ let lastMode: 'text' | 'vision' = 'text';
 let sessionId = 0;
 let epoch = 0;
 let awaitingId = false;
+let copying = false;
+let closed = false;
+let closeAfterCopy = false;
 type Terminal = Extract<ExplainEvent, { kind: 'done' | 'error' }>;
 const early = new Map<number, { text: string; terminal: Terminal | null }>();
 
@@ -77,7 +82,12 @@ function setState(next: State): void {
   setup.hidden = next !== 'unconfigured';
   failure.hidden = next !== 'error';
   emptyState.hidden = next !== 'idle' || latestAnswer.length > 0;
+  updateCopy();
   updateModeLabel();
+}
+
+function updateCopy(): void {
+  copy.disabled = closed || copying || latestAnswer.length === 0 || state === 'generating';
 }
 
 function updateModeLabel(): void {
@@ -92,7 +102,7 @@ function errorText(code: AiErrorCode): string {
 }
 
 async function ask(): Promise<void> {
-  if (!words || state === 'generating') return;
+  if (closed || !words || state === 'generating') return;
   const q = question.value.trim();
   if (!q) {
     showHint(words.empty, true);
@@ -128,15 +138,19 @@ function fail(code: AiErrorCode): void {
   lastId = null;
   awaitingId = false;
   early.clear();
+  if (code === 'outputLimit' && latestAnswer.length > 0) {
+    showHint(errorText(code), true);
+    setState('done');
+    return;
+  }
   showHint('', false);
   failureTitle.textContent = words?.errorTitle ?? '';
   failureText.textContent = errorText(code);
-  copy.disabled = latestAnswer.length === 0;
   setState('error');
 }
 
 async function askRequest(q: string, screenshot?: VisionAsk): Promise<void> {
-  if (!words || state === 'generating') return;
+  if (closed || !words || state === 'generating') return;
   invalidate();
   const requestEpoch = epoch;
   lastQuestion = q;
@@ -177,9 +191,22 @@ stopBtn.addEventListener('click', () => {
   invalidate();
   showHint('', false);
   setState(latestAnswer.length > 0 ? 'done' : 'idle');
-  copy.disabled = latestAnswer.length === 0;
 });
-function close(): void { invalidate(); vision.destroy(); window.explainApi.close(); }
+function close(): void {
+  if (closed) {
+    // A second close is an explicit escape hatch if the platform clipboard operation never settles.
+    if (closeAfterCopy) { closeAfterCopy = false; window.explainApi.close(); }
+    return;
+  }
+  closed = true;
+  invalidate();
+  vision.destroy();
+  send.disabled = true;
+  if (copying) {
+    closeAfterCopy = true;
+    window.explainApi.stop();
+  } else window.explainApi.close();
+}
 closeBtn.addEventListener('click', close);
 openSettingsBtn.addEventListener('click', () => window.explainApi.openSettings());
 retry.addEventListener('click', () => {
@@ -194,21 +221,34 @@ retry.addEventListener('click', () => {
   question.value = lastQuestion;
   void ask();
 });
-copy.addEventListener('click', () => {
-  if (!latestAnswer || !words) return;
+async function copyAnswer(): Promise<void> {
+  if (closed || copying || !latestAnswer || !words || state === 'generating') return;
   const w = words;
-  void navigator.clipboard.writeText(latestAnswer).then(
-    () => {
+  const text = latestAnswer;
+  const copyEpoch = epoch;
+  const current = (): boolean => !closed && epoch === copyEpoch && latestAnswer === text;
+  copying = true;
+  copied.textContent = '';
+  copied.classList.remove('warn');
+  updateCopy();
+  try {
+    await navigator.clipboard.writeText(text);
+    if (current()) {
       copied.textContent = w.copied;
       copied.classList.remove('warn');
-    },
-    () => {
-      // P1A swallowed this failure; now the user knows why nothing landed in the clipboard.
+    }
+  } catch {
+    if (current()) {
       copied.textContent = w.copyFailed;
       copied.classList.add('warn');
-    },
-  );
-});
+    }
+  } finally {
+    copying = false;
+    if (closeAfterCopy) { closeAfterCopy = false; window.explainApi.close(); }
+    else if (!closed) updateCopy();
+  }
+}
+copy.addEventListener('click', () => { void copyAnswer(); });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
@@ -241,7 +281,6 @@ function receive(ev: ExplainEvent): void {
     showHint('', false);
     if (latestAnswer.length > 0) {
       setState('done');
-      copy.disabled = false;
     } else {
       fail('badResponse');
     }

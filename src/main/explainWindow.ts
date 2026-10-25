@@ -7,6 +7,7 @@ import { MAX_VISION_DATA_URL_CHARS, type VisionReply, type VisionResult, type Vi
 import type { VisionImage } from '../shared/vision';
 import type { AiErrorCode } from '../shared/aiConfig';
 import { VisionSnapshotError, VisionSnapshots } from './visionSnapshot';
+import { useDarkWindowFrame } from './windowsFrame';
 
 export interface VisionUpload {
   images: readonly VisionImage[];
@@ -39,6 +40,7 @@ export interface ExplainDeps {
 }
 
 let win: BrowserWindow | null = null;
+let revealWindow: (() => void) | null = null;
 let words: ExplainText | null = null;
 let deps: ExplainDeps | null = null;
 let currentId = 0;
@@ -183,10 +185,7 @@ export function registerExplainWindow(d: ExplainDeps): void {
     } finally {
       captureInProgress = false;
       // A replacement card may have reached ready-to-show while the capture scope kept it hidden.
-      if (win && win !== owner && !win.isDestroyed()) {
-        win.show();
-        win.focus();
-      }
+      if (win && win !== owner && !win.isDestroyed()) revealWindow?.();
     }
   });
   ipcMain.on(EXPLAIN_CH.closePreview, (event, raw: unknown) => {
@@ -211,8 +210,9 @@ function ownsMainFrame(event: Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>
 
 /** Only the newest stream may draw, and only while the window exists — late events from a replaced or dead request die here. */
 function sink(ev: ExplainEvent): void {
-  if (ev.id !== currentId || !win || win.isDestroyed()) return;
+  if (ev.id !== currentId || !generating || !win || win.isDestroyed()) return;
   win.webContents.send(EXPLAIN_CH.event, ev);
+  if (ev.kind === 'delta' && ev.text.length > 0) hasAnswer = true;
   if (ev.kind === 'done') {
     generating = false;
     visionGenerating = false;
@@ -240,8 +240,7 @@ export function openExplainWindow(point: { x: number; y: number }, text: Explain
     // A second gesture while the card is up shows the card it already has; spawning another would steal focus twice.
     win.webContents.mainFrame.send(EXPLAIN_CH.visionSession, visionSessionId);
     if (!captureInProgress) {
-      win.show();
-      win.focus();
+      revealWindow?.();
     }
     return;
   }
@@ -260,7 +259,9 @@ export function openExplainWindow(point: { x: number; y: number }, text: Explain
     minWidth: Math.min(400, area.width),
     minHeight: Math.min(360, area.height),
     frame: false,
-    backgroundColor: '#12141c',
+    backgroundColor: '#010a13',
+    // Idle border color is separate from the native resize gutter's dark-mode opt-in.
+    ...(process.platform === 'win32' ? { accentColor: '#53452d' } : {}),
     resizable: true,
     minimizable: false,
     maximizable: true,
@@ -284,8 +285,27 @@ export function openExplainWindow(point: { x: number; y: number }, text: Explain
 }
 
 function setup(w: BrowserWindow): void {
+  let pageReady = false;
+  let frameReady = false;
+  let focusTimer: ReturnType<typeof setTimeout> | undefined;
+  let focused = false;
+  const reveal = (): void => {
+    if (!pageReady || !frameReady || captureInProgress || w.isDestroyed() || win !== w) return;
+    w.show();
+    w.focus();
+    focusTimer ??= setTimeout(() => {
+      if (!w.isDestroyed() && !focused && !captureInProgress && !previewOpen) w.close();
+    }, FOCUS_WAIT_MS);
+  };
+  revealWindow = reveal;
+  // Unsupported/blocked native styling falls back to a usable card; no global theme or input settings change.
+  void useDarkWindowFrame(w).then(() => { frameReady = true; reveal(); });
   w.on('closed', () => {
-    if (win === w) win = null;
+    if (win === w) {
+      win = null;
+      revealWindow = null;
+    }
+    clearTimeout(focusTimer);
     currentId += 1;
     generating = false;
     hasAnswer = false;
@@ -298,7 +318,6 @@ function setup(w: BrowserWindow): void {
     for (const cb of goneListeners) cb();
   });
   w.setAlwaysOnTop(true, 'screen-saver'); // above the overlay, like the text box
-  let focused = false;
   w.on('focus', () => {
     focused = true;
   });
@@ -307,13 +326,9 @@ function setup(w: BrowserWindow): void {
   w.on('blur', () => {
     if (focused && !generating && !hasAnswer && !captureInProgress && !previewOpen) w.close();
   });
-  const focusTimer = setTimeout(() => {
-    if (!w.isDestroyed() && !focused && !captureInProgress && !previewOpen) w.close();
-  }, FOCUS_WAIT_MS);
-  w.once('closed', () => clearTimeout(focusTimer));
   w.once('ready-to-show', () => {
-    w.show();
-    w.focus();
+    pageReady = true;
+    reveal();
   });
   const closeIfAlive = (): void => {
     if (!w.isDestroyed()) w.close();

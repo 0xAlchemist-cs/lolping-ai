@@ -20,6 +20,15 @@ export function AiConfigSection({ settings: s, update }: { settings: Settings; u
   const [keyDraft, setKeyDraft] = useState('');
   const [keyMsg, setKeyMsg] = useState<string | null>(null);
   const [test, setTest] = useState<TestResult>(null);
+  const [baseDraft, setBaseDraft] = useState(s.aiBaseUrl);
+  const [modelDraft, setModelDraft] = useState(s.aiModel);
+  const [editing, setEditing] = useState<'baseUrl' | 'model' | null>(null);
+
+  // IPC replies can trail the current keystroke. Keep the active input synchronous so its caret is not reset.
+  useEffect(() => {
+    if (editing !== 'baseUrl') setBaseDraft(s.aiBaseUrl);
+    if (editing !== 'model') setModelDraft(s.aiModel);
+  }, [s.aiBaseUrl, s.aiModel, editing]);
 
   const refresh = (): void => {
     void window.settingsApi.getAiStatus().then(setStatus);
@@ -68,16 +77,27 @@ export function AiConfigSection({ settings: s, update }: { settings: Settings; u
       </SettingRow>
       <SettingRow icon={<ArrowClockwise24Regular />} title={t.aiSettings.baseUrl} description={t.aiSettings.baseUrlDesc}>
         <Input
-          value={s.aiBaseUrl}
+          value={baseDraft}
           style={{ width: 300 }}
           placeholder="https://api.example.com/v1"
           spellCheck={false}
-          onChange={(_, d) => void update({ aiBaseUrl: d.value.slice(0, 200) })}
+          onFocus={() => setEditing('baseUrl')}
+          onBlur={() => setEditing(null)}
+          onChange={(_, d) => {
+            const next = d.value.slice(0, 200);
+            setBaseDraft(next);
+            void update({ aiBaseUrl: next });
+          }}
         />
       </SettingRow>
       <SettingRow icon={<ArrowClockwise24Regular />} title={t.aiSettings.model} description={t.aiSettings.modelDesc}>
-        <Input value={s.aiModel} style={{ width: 220 }} spellCheck={false}
-          onChange={(_, d) => void update({ aiModel: d.value.slice(0, 100) })} />
+        <Input value={modelDraft} style={{ width: 220 }} spellCheck={false}
+          onFocus={() => setEditing('model')} onBlur={() => setEditing(null)}
+          onChange={(_, d) => {
+            const next = d.value.slice(0, 100);
+            setModelDraft(next);
+            void update({ aiModel: next });
+          }} />
       </SettingRow>
       <SettingRow icon={<Key24Regular />} title={t.aiSettings.keyLabel} description={t.aiSettings.keyDesc}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

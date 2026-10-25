@@ -67,7 +67,7 @@ async function setup() {
     on: (cb) => { receive = cb; return () => undefined; },
     onVisionSession: (cb) => { session = cb; return () => undefined; },
   };
-  const writeText = vi.fn(async () => undefined);
+  const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
   vi.stubGlobal('document', document);
   vi.stubGlobal('window', Object.assign(new EventTarget(), { explainApi: api }));
   vi.stubGlobal('navigator', { clipboard: { writeText } });
@@ -82,6 +82,135 @@ async function setup() {
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Explain renderer', () => {
+  async function answered(text = 'Synthetic answer') {
+    const t = await setup();
+    t.get('question').value = 'Synthetic question';
+    t.submit(); t.pending.resolve(9); await Promise.resolve();
+    t.receive({ kind: 'delta', id: 9, text }); t.receive({ kind: 'done', id: 9 });
+    return t;
+  }
+
+  it.each(['network', 'badResponse', 'timeout', 'tooLong', 'server'] as const)(
+    'keeps visible partial text copyable after %s and ignores duplicate late termination', async (code) => {
+      const t = await setup(); t.get('question').value = 'Synthetic failure'; t.submit();
+      t.pending.resolve(9); await Promise.resolve();
+      t.receive({ kind: 'delta', id: 9, text: '中文🙂\npartial' });
+      t.receive({ kind: 'error', id: 9, code });
+      t.receive({ kind: 'delta', id: 9, text: 'late corruption' }); t.receive({ kind: 'done', id: 9 });
+      expect(t.get('body').textContent).toBe('中文🙂\npartial');
+      expect(t.get('failureText').textContent).toBe(strings('en').aiError[code]);
+      expect(t.get('hint').textContent).toBe('');
+      expect(t.get('stop').hidden).toBe(true); expect(t.get('send').disabled).toBe(false);
+      t.get('copy').click(); await Promise.resolve();
+      expect(t.writeText).toHaveBeenCalledWith('中文🙂\npartial');
+      expect(t.get('copied').textContent).toBe(strings('en').explainWindow.copied);
+    });
+
+  it.each(['sync', 'async'])('shows a fixed failure and permits a manual copy after a %s clipboard failure', async (mode) => {
+    const t = await answered();
+    t.writeText.mockImplementationOnce(() => {
+      if (mode === 'sync') throw new Error('private synthetic detail');
+      return Promise.reject(new Error('private synthetic detail'));
+    });
+    t.get('copy').click(); await Promise.resolve();
+    expect(t.get('copied').textContent).toBe(strings('en').explainWindow.copyFailed);
+    expect(t.get('copied').classes.has('warn')).toBe(true);
+    expect(t.get('copy').disabled).toBe(false);
+    expect(t.writeText).toHaveBeenCalledOnce();
+    t.get('copy').click(); await Promise.resolve();
+    expect(t.get('copied').textContent).toBe(strings('en').explainWindow.copied);
+    expect(t.writeText).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears an earlier success label and disables duplicate copy clicks until the current write settles', async () => {
+    const t = await answered();
+    t.get('copy').click(); await Promise.resolve();
+    expect(t.get('copied').textContent).toBe(strings('en').explainWindow.copied);
+    const write = deferred<void>();
+    t.writeText.mockReturnValueOnce(write.promise);
+    t.get('copy').click();
+    expect(t.get('copied').textContent).toBe('');
+    expect(t.get('copy').disabled).toBe(true);
+    t.get('copy').click();
+    write.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(t.writeText).toHaveBeenCalledTimes(2);
+    expect(t.get('copy').disabled).toBe(false);
+    expect(t.get('copied').textContent).toBe(strings('en').explainWindow.copied);
+  });
+
+  it('does not let an old pending copy label a replacement answer or overlap its clipboard write', async () => {
+    const t = await answered('Old synthetic answer');
+    const write = deferred<void>();
+    let clipboard = '';
+    t.writeText.mockImplementationOnce(text => write.promise.then(() => { clipboard = text; }));
+    t.get('copy').click();
+    vi.mocked(t.api.ask).mockResolvedValueOnce(10);
+    t.get('question').value = 'New synthetic question'; t.submit(); await Promise.resolve();
+    t.receive({ kind: 'delta', id: 10, text: 'New synthetic answer' }); t.receive({ kind: 'done', id: 10 });
+    expect(t.get('copy').disabled).toBe(true);
+    t.get('copy').click();
+    write.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(clipboard).toBe('Old synthetic answer');
+    expect(t.get('copied').textContent).toBe('');
+    expect(t.get('copy').disabled).toBe(false);
+    t.writeText.mockImplementationOnce(async text => { clipboard = text; });
+    t.get('copy').click(); await Promise.resolve(); await Promise.resolve();
+    expect(clipboard).toBe('New synthetic answer');
+    expect(t.get('copied').textContent).toBe(strings('en').explainWindow.copied);
+  });
+
+  it('ignores a pending copy completion after closing the card', async () => {
+    const t = await answered();
+    const write = deferred<void>(); t.writeText.mockReturnValueOnce(write.promise);
+    t.get('copy').click(); t.get('close').click();
+    write.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(t.get('copied').textContent).toBe('');
+    expect(t.api.close).toHaveBeenCalledOnce();
+  });
+
+  it.each(['resolve', 'reject'])('waits for an in-flight clipboard write to %s before the user-requested close', async (outcome) => {
+    const t = await answered();
+    let finish: () => void = () => undefined;
+    t.writeText.mockImplementationOnce(() => new Promise<void>((resolve, reject) => {
+      finish = outcome === 'resolve' ? resolve : () => reject(new Error('synthetic clipboard rejection'));
+    }));
+    t.get('copy').click();
+    t.get('close').click();
+    expect(t.api.close).not.toHaveBeenCalled();
+    expect(t.api.stop).toHaveBeenCalledOnce();
+    t.get('question').value = 'No request while closing'; t.submit();
+    expect(t.api.ask).toHaveBeenCalledOnce();
+    finish(); await Promise.resolve(); await Promise.resolve();
+    expect(t.api.close).toHaveBeenCalledOnce();
+    expect(t.get('copied').textContent).toBe('');
+  });
+
+  it('allows a second close to cancel waiting for a stuck clipboard operation without closing twice later', async () => {
+    const t = await answered(); const write = deferred<void>(); t.writeText.mockReturnValueOnce(write.promise);
+    t.get('copy').click(); t.get('close').click();
+    expect(t.api.close).not.toHaveBeenCalled();
+    t.get('close').click(); expect(t.api.close).toHaveBeenCalledOnce();
+    write.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(t.api.close).toHaveBeenCalledOnce();
+  });
+  it.each([false, true])('keeps a partial output-limit answer copyable with a warning, early=%s', async (early) => {
+    const t = await setup();
+    t.get('question').value = 'Synthetic output limit';
+    t.submit();
+    if (!early) { t.pending.resolve(9); await Promise.resolve(); }
+    t.receive({ kind: 'delta', id: 9, text: 'Partial synthetic answer' });
+    t.receive({ kind: 'error', id: 9, code: 'outputLimit' });
+    if (early) { t.pending.resolve(9); await Promise.resolve(); }
+    expect(t.get('body').textContent).toBe('Partial synthetic answer');
+    expect(t.get('failure').hidden).toBe(true);
+    expect(t.get('hint').classes.has('warn')).toBe(true);
+    expect(t.get('hint').textContent).toBe(strings('en').aiError.outputLimit);
+    expect(t.get('send').disabled).toBe(false);
+    expect(t.get('stop').hidden).toBe(true);
+    t.get('copy').click();
+    expect(t.writeText).toHaveBeenCalledWith('Partial synthetic answer');
+  });
+
   it.each(['error', 'stop'] as const)('keeps image-request wording after %s before the first answer token', async (action) => {
     const t = await setup();
     t.get('previewOpen').click();

@@ -9,6 +9,8 @@ import { MAX_VISION_DATA_URL_CHARS, type VisionPreview, type VisionResult, type 
 const { windows } = vi.hoisted(() => ({ windows: [] as unknown[] }));
 const { handles } = vi.hoisted(() => ({ handles: new Map<string, (event: unknown, raw: unknown) => unknown>() }));
 const { sends } = vi.hoisted(() => ({ sends: new Map<string, (event: unknown, raw: unknown) => void>() }));
+const { darkFrame } = vi.hoisted(() => ({ darkFrame: vi.fn<() => Promise<boolean>>() }));
+vi.mock('../../src/main/windowsFrame', () => ({ useDarkWindowFrame: darkFrame }));
 
 vi.mock('electron', async () => {
   const { EventEmitter: Emitter } = await import('node:events');
@@ -108,6 +110,7 @@ beforeEach(async () => {
   displayPresent = true;
   currentWorkArea = { x: 0, y: 0, width: 1920, height: 1040 };
   deps.capture.mockReset();
+  darkFrame.mockReset().mockResolvedValue(true);
   deps.capture.mockResolvedValue({ ok: true, preview: PREVIEW });
   vi.resetModules();
   mod = await import('../../src/main/explainWindow');
@@ -145,7 +148,8 @@ function deferredFlow<T>() {
 }
 
 /** Actual renderer -> authorized main IPC -> snapshots -> preparation -> actual client, with only OS/network fakes. */
-async function flow(options: { pendingPreparation?: boolean; status?: number; holdStream?: boolean } = {}) {
+async function flow(options: { pendingPreparation?: boolean; status?: number; holdStream?: boolean;
+  streamEnd?: 'length' | 'malformed' | 'network' | 'eof' } = {}) {
   const { TEST_JPEG_DATA_URL, TEST_JPEG_BASE64 } = await import('./fixtures/visionJpeg');
   const jpeg = Buffer.from(TEST_JPEG_BASE64, 'base64');
   const fullUrl = 'data:image/jpeg;base64,' + Buffer.concat([jpeg.subarray(0, 2),
@@ -172,6 +176,10 @@ async function flow(options: { pendingPreparation?: boolean; status?: number; ho
       if (options.status) { yield new TextEncoder().encode('{"error":{"message":"synthetic private echo"}}'); return; }
       yield new TextEncoder().encode('data: {"choices":[{"delta":{"content":"mock dual answer"}}]}\n\n');
       if (options.holdStream) await resume.promise;
+      if (options.streamEnd === 'network') throw new TypeError('synthetic disconnect');
+      if (options.streamEnd === 'eof') return;
+      if (options.streamEnd === 'malformed') yield new TextEncoder().encode('data: {broken}\n\n');
+      if (options.streamEnd === 'length') yield new TextEncoder().encode('data: {"choices":[{"finish_reason":"length"}]}\n\n');
       yield new TextEncoder().encode('data: [DONE]\n\n');
     })() };
   });
@@ -229,6 +237,19 @@ async function flow(options: { pendingPreparation?: boolean; status?: number; ho
 }
 
 describe('explainWindow dual-image integration', () => {
+  it.each([['length', 'outputLimit'], ['malformed', 'badResponse'], ['network', 'network'], ['eof', 'badResponse']] as const)(
+    'keeps the partial answer through renderer/main/client on %s without a false completion', async (streamEnd, code) => {
+      const t = await flow({ streamEnd }); await t.open(); t.both(); t.get('visionSend').click();
+      await vi.waitFor(() => expect(t.get('send').disabled).toBe(false));
+      expect(t.get('body').textContent).toBe('mock dual answer');
+      expect(t.get('copy').disabled).toBe(false);
+      expect(t.get('stop').hidden).toBe(true);
+      expect(t.get('hint').textContent).not.toBe(WORDS.generating);
+      expect(code === 'outputLimit' ? t.get('hint').textContent : t.get('failureText').textContent).toBe(WORDS.errors[code]);
+      expect(t.fetchImpl).toHaveBeenCalledOnce();
+      expect(t.trace).toContain(`failure.${code}`);
+      expect(t.trace).not.toContain('sse.done');
+    });
   it('sends exactly the two reviewed images once and exits generating after actual SSE done', async () => {
     const t = await flow(); await t.open(); t.both();
     expect(t.get('visionSelection').textContent).toBe(WORDS.vision.selectedBoth);
@@ -392,6 +413,17 @@ describe('explainWindow confirmed vision upload', () => {
     expect(handles.get(EXPLAIN_CH.state)?.(ownerEvent(win), undefined)).toBeNull();
   });
 
+  it.each(['outputLimit', 'stop'] as const)('keeps displayed partial text after %s when focus moves away', async (terminal) => {
+    const { send, win } = await prepare();
+    const reply = await send() as { ok: true; id: number };
+    asked[0].sink({ kind: 'delta', id: reply.id, text: 'Partial synthetic answer' });
+    if (terminal === 'outputLimit') asked[0].sink({ kind: 'error', id: reply.id, code: 'outputLimit' });
+    else sends.get(EXPLAIN_CH.stop)?.(ownerEvent(win), undefined);
+    win.emit('focus');
+    win.emit('blur');
+    expect(handles.get(EXPLAIN_CH.state)?.(ownerEvent(win), undefined)).not.toBeNull();
+  });
+
   it('rejects forged payloads, missing consent and foreign frames before starting a request', async () => {
     const { send, uploads, win } = await prepare();
     for (const input of [{ confirmed: false }, { images: ['file:///private'] }, { dataUrl: 'fake' },
@@ -440,6 +472,20 @@ function session(w: FakeWindow): number {
 }
 
 describe('explainWindow streaming protocol', () => {
+  it.each(['done', 'error'] as const)('forwards only one terminal event after %s and discards later deltas', async (kind) => {
+    mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
+    const w = windows[0] as FakeWindow;
+    const id = handles.get(EXPLAIN_CH.ask)?.(ownerEvent(w), 'synthetic terminal') as number;
+    const emit = asked[0].sink;
+    const terminal: ExplainEvent = kind === 'done' ? { kind, id } : { kind, id, code: 'network' };
+    emit({ kind: 'delta', id, text: 'partial' });
+    emit(terminal);
+    emit(terminal);
+    emit({ kind: 'delta', id, text: 'late corruption' });
+    emit({ kind: 'error', id, code: 'server' });
+    expect(w.webContents.sent.filter(([channel]) => channel === EXPLAIN_CH.event).map(([, event]) => event))
+      .toEqual([{ kind: 'delta', id, text: 'partial' }, terminal]);
+  });
   it('streams an ask: id out, deltas in, done ends it', async () => {
     mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
     const contents = (windows[0] as FakeWindow).webContents;
@@ -514,6 +560,36 @@ describe('explainWindow streaming protocol', () => {
 });
 
 describe('explainWindow local capture lifecycle', () => {
+  it('waits for native frame preparation before showing without expiring the focus watchdog while hidden', async () => {
+    let finish: (ok: boolean) => void = () => undefined;
+    darkFrame.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    mod.openExplainWindow({ x: 10, y: 20 }, WORDS, TARGET);
+    const w = windows[0] as FakeWindow;
+    w.emit('ready-to-show');
+    vi.advanceTimersByTime(2600);
+    expect(w.shown).toBe(false);
+    expect(handles.get(EXPLAIN_CH.state)?.(ownerEvent(w), undefined)).not.toBeNull();
+    finish(true);
+    await Promise.resolve();
+    expect(w.shown).toBe(true);
+  });
+
+  it('ignores a late native frame result after closing and opens a replacement if styling is unavailable', async () => {
+    let finish: (ok: boolean) => void = () => undefined;
+    darkFrame.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    mod.openExplainWindow({ x: 10, y: 20 }, WORDS, TARGET);
+    const old = windows[0] as FakeWindow;
+    old.emit('ready-to-show');
+    old.close();
+    darkFrame.mockResolvedValueOnce(false);
+    mod.openExplainWindow({ x: 10, y: 20 }, WORDS, TARGET);
+    const replacement = windows[1] as FakeWindow;
+    replacement.emit('ready-to-show');
+    finish(true);
+    await Promise.resolve();
+    expect(old.shown).toBe(false);
+    expect(replacement.shown).toBe(true);
+  });
   it('uses the frozen wheel centre without a key, an ask, a fetch or a stream cancellation', async () => {
     configuredFlag = false;
     const fetch = vi.fn(() => { throw new Error('capture must stay local'); });
@@ -608,6 +684,8 @@ describe('explainWindow local capture lifecycle', () => {
     const next = windows[1] as FakeWindow;
     const focused = vi.fn();
     next.on('focus', focused);
+    next.emit('ready-to-show');
+    await Promise.resolve();
     finish({ ok: true, preview: PREVIEW });
     expect(await pending).toBeNull();
     expect(next.shown).toBe(true);

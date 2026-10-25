@@ -126,6 +126,17 @@ lolPing/
   docs/design.md               this document
 ```
 
+### Settings input editing (fork, P2A-3)
+
+AI endpoint and model fields keep a synchronous draft while focused. Each keystroke still saves through the existing
+settings API, but delayed settings replies cannot replace the active draft and move its caret. Unfocused fields
+follow the canonical settings again. The password field and key storage are unchanged. The settings GitHub button
+opens this fork; the existing updater's release-note fallback remains separate from the project homepage.
+
+`node tools/settings-input-smoke.cjs` mounts the actual Fluent inputs and useAppState in an isolated, sandboxed Electron
+window with synthetic settings. Explicitly released IPC replies test middle insertion/deletion, rapid input, stale
+replies, Unicode replacement and saving without reading real settings, touching keys or calling an AI service.
+
 ## 5. Hook helper
 
 ### 5.1 Input decision logic (pure, unit-tested state machine in `decision.cpp`)
@@ -502,11 +513,46 @@ target or capture coordinates. Text mode explicitly says it sends no screenshots
 the consent panel, so the image scope, destination, privacy notice and send button remain visible while reviewing.
 At wider sizes the local and full previews use two columns. Native resizing needs no additional IPC or preload entry.
 
+On Windows the dark card also opts its own native frame into DWM dark mode (attribute 20). CSS backgrounds and the
+idle accent border do not color the native gutter exposed during fast edge resizing on a light system theme.
+`windowsFrame.ts` invokes a fixed hidden PowerShell command with only a numeric HWND and the owning process ID,
+verifies ownership in the child and applies the per-window attribute. It never changes `nativeTheme.themeSource`,
+the system theme, resize styles or the input helper. Page readiness and this bounded asynchronous preparation both
+settle before revealing the card; unsupported or failed native styling falls back to a usable card. Closing a card
+discards late preparation results. `node tools/window-resize-smoke.cjs` compares unstyled/styled synthetic windows
+using injected native drags at about 6000 horizontal pixels per second and in-memory edge samples. It proves an OS
+reproducer, not a physical user gesture or every GPU/DPI configuration. Images are never written to disk.
+
 The preview stays local until the user clicks **Send selected screenshots and ask**. Local crop is the default;
 including the full monitor requires a separate checkbox. The card names the image count and scope, recipient domain
 and model, and asks the user to check personal information before sending. The original Ask button always sends a
 plain string and never inherits images. Both modes share the same guarded `streamChat` client and encrypted key.
 No new host, setting, key store or preload entry is added.
+
+An SSE `finish_reason: length` followed by `[DONE]` now reports an output-limit warning while keeping visible partial
+text available to copy. Missing `[DONE]` still fails as an incomplete stream; the one-token connectivity probe still
+accepts an empty completion. No automatic continuation, larger token budget or retry is introduced. The main process
+retains a card once it has received visible text, including after Stop or an error, so moving focus does not discard
+the partial answer. This handling does not establish the cause of a real answer truncation without its terminal event.
+
+The P2A-3 termination audit also rejects malformed JSON event payloads and explicit finish reasons other than
+`stop`/`length`; neither may turn a damaged or unsupported response into apparent success. Missing finish reasons
+remain compatible with providers that terminate with `[DONE]` alone. Main forwards events only while that request
+is generating, so its first terminal event seals the stream. A local injected `onDiagnostic` observer can receive one
+frozen metadata summary (counts, normalized finish category, HTTP status, DONE/abort/error flags and elapsed time).
+The ordinary app does not install this observer; there is no diagnostic IPC, persistent log or new renderer permission.
+
+Copy snapshots the visible answer and its request epoch. One clipboard operation may be in flight per card, including
+when a new answer replaces the old one. Each click clears earlier feedback; only a completion for the current answer
+may update that feedback. User-initiated close cancels generation immediately but lets an existing clipboard write
+settle before destroying the renderer. A second close cancels that wait if the OS operation is stuck. App shutdown
+and forced window destruction do not promise to complete an uncommitted write. No retry or background overwrite is used.
+
+`node tools/clipboard-smoke.cjs` uses the production sandbox renderer with synthetic answers and an isolated profile.
+It checks the exact text passed to the browser and, separately, the exact Windows CF_UNICODETEXT representation
+(CRLF line endings). It covers serial/rapid copy, focus loss, Stop, answer replacement, immediate close and both
+orderings of a controlled external process write. It writes a synthetic seed before reading; it never reads an old
+user clipboard or stores clipboard history. Foreign writes after a successful copy are legitimate system-wide changes.
 
 Main owns one immutable JPEG snapshot (`visionSnapshot.ts`) bound to the Explain/ping session, a generated snapshot
 revision, and the normalized endpoint/model at preview time. It retains at most two JPEGs for 120 seconds. Closing the

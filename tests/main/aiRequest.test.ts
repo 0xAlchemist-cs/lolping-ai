@@ -26,6 +26,28 @@ function setup() {
 afterEach(() => vi.useRealTimers());
 
 describe('AiRequests', () => {
+  it('finishes the replacement request and refuses late content from a cancelled old server stream', async () => {
+    const oldResume = deferred<void>(); const firstToken = deferred<void>();
+    let calls = 0; const oldText: string[] = []; const newText: string[] = [];
+    const fetchImpl = vi.fn(async () => {
+      const first = calls++ === 0;
+      return { ok: true, status: 200, body: (async function* () {
+        yield new TextEncoder().encode(`data: {"choices":[{"delta":{"content":"${first ? 'old prefix' : 'new answer'}"}}]}\n\n`);
+        if (first) { await oldResume.promise; yield new TextEncoder().encode('data: {"choices":[{"delta":{"content":"late old"}}]}\n\n'); }
+        yield new TextEncoder().encode('data: [DONE]\n\n');
+      })() };
+    });
+    const requests = new AiRequests({ prepare: async () => ready, recipient: () => recipient, fetchImpl, now: () => 0 });
+    const old = requests.run('old synthetic question', 1024, text => { oldText.push(text); firstToken.resolve(); });
+    await firstToken.promise;
+    const replacement = requests.run('new synthetic question', 1024, text => newText.push(text));
+    expect(await replacement).toEqual({ ok: true });
+    oldResume.resolve();
+    expect(await old).toEqual({ ok: false, code: 'aborted' });
+    expect(oldText).toEqual(['old prefix']);
+    expect(newText).toEqual(['new answer']);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
   it.each(['cancel', 'config', 'disabled', 'expired', 'snapshot'] as const)(
     'does not start a client request when %s occurs during asynchronous key/DNS preparation', async (action) => {
       vi.useFakeTimers();
