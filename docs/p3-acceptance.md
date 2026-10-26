@@ -22,7 +22,8 @@ Existing dependencies were reused through the local junction; no lockfile change
 | `npm run build` | exit 0 | Main, renderer and five independent sandbox preload bundles |
 | `npm run build:site` | exit 0 | Browser demo uses a no-op action shim |
 | `npm run test:helper` with `CL='/utf-8 /Zc:preprocessor'` | 542 passed, exit 0 | Original input helper unchanged; flags address the existing local MSVC source/macro compatibility issue |
-| `npm run test:desktop` | 101 unit checks; 32 e2e passed, 0 failed, 2 skipped; exit 0 | Foreground-success canary and desktop window effect unavailable in this session; denial/matching and minimized restoration still checked |
+| Earlier `npm run test:desktop` checkpoint | 101 unit checks; 32 e2e passed, 0 failed, 2 skipped; exit 0 | Foreground-success canary and desktop effect unavailable; latest strict failure and integrated-revision scope are recorded below |
+| Integrated native build + protocol units + `tests/fixture_commands.mjs` | `/W4 /WX` build clean; 101 protocol + 15 hidden-window checks passed | Exact bounded parsing, NUL/long-line rejection, removed injection commands and clean quit; no desktop changes or injected input; revised desktop e2e/diag remain unrun |
 | `node tools/vision-smoke.cjs` | PASS | Controlled Windows capture/overlay/AI-card regression; synthetic gestures |
 | `node tools/window-resize-smoke.cjs` | PASS | Owned-window native resize, injected mouse input |
 | `node tools/vision-ai-smoke.cjs` | PASS | Synthetic JPEG/SSE integration |
@@ -79,6 +80,13 @@ The strict gate is useful, while causal/foreground exclusions and diagnostic inp
 need revision. See `p3-desktop-review.md` for logs and the zcode follow-up. Shell state
 remains a hypothesis, not a complete exclusion of lolPing contributions.
 
+The follow-up diagnostic revision is now integrated locally. Codex removed the unused
+fixture input commands, fixed long-line/NUL parsing after a real failing check, and added
+15 passing hidden-window regressions to the native test entry. The 101 protocol units
+and native build pass. Revised foreground diagnostics remain unrun; these checks do not
+clear the earlier strict desktop failures. See `p3-desktop-diagnosis.md` and the follow-up
+in `p3-desktop-review.md`.
+
 Microsoft documents ToggleDesktop as showing/hiding the desktop under the shell's own
 rules: [IShellDispatch4.ToggleDesktop](https://learn.microsoft.com/en-us/windows/win32/shell/ishelldispatch4-toggledesktop).
 A successful native request alone cannot satisfy the product's window-level acceptance.
@@ -112,9 +120,9 @@ actions, inject production shortcuts or suppress existing features to obtain a p
 Codex committed the native handoff and packaging with normal Git, without modifying or
 bypassing zcode's environment gate. External `feat/p3-packaging-ci` commit `0408738` was
 integrated as `00acde7`. Only the native module and the four agreed packaging paths were
-included; `.mimosa` state was excluded. The current zcode priority task is defined in
-`p3-zcode-diagnosis-review-task.md` following the first handoff review recorded in
-`p3-desktop-review.md`. Codex completed the paused program-boundary coverage
+included; `.mimosa` state was excluded. Zcode's follow-up from
+`p3-zcode-diagnosis-review-task.md` was reviewed and integrated with the parser and input
+command cleanup recorded in `p3-desktop-review.md`. Codex completed the paused program-boundary coverage
 locally; see `p3-program-verification.md`. User direction is local fixes first, with no
 new pushes or PR creation. No PR was created; the earlier authorized branch push completed
 before the cancellation, and the remote branch remains at `3f8ea16`.

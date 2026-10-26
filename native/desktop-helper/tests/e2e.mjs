@@ -2,9 +2,9 @@
 // bounds and result serialization, plus controlled GUI fixture scenarios and two real desktop
 // toggles. Run: node native/desktop-helper/run.mjs test
 import { spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -103,6 +103,8 @@ function runFixture(exe, mode) {
       });
     },
     kill() { child.kill(); },
+    /** Sends one stdin command line to the fixture's diagnostic channel. */
+    write(s) { child.stdin.write(s + '\n'); },
     /** Kills and resolves once the process is really gone (its exe may still be locked otherwise). */
     async killAndWait(timeoutMs = 3000) {
       child.kill();
@@ -335,30 +337,159 @@ if (!probeReady || probeReady.startsWith('error ')) {
 }
 
 // --- two real desktop toggles (disruptive: run last) ---------------------------------------
-// The two requests always run and assert desktopToggled; a fixture window additionally
-// observes the actual effect (one toggle moves it one way, the other brings it back, the
-// direction depending on the desktop's current show state).
+// Default: both requests must answer desktopToggled with exit 0; the fixture window adds an
+// opportunistic effect observation, and a missing effect stays a visible skip, never a pass.
+// LOLPING_DESKTOP_EFFECT_STRICT=1: acceptance mode - the pair must actually move the window
+// both ways (one minimize and one restore, order depends on the desktop's start state) or
+// the run fails. A reply-only success never passes strict mode.
+// LOLPING_DESKTOP_DIAG=1: after the pair, labeled NON-INPUT comparisons (agreed idle window
+// only): fixture observer self-test, aggregate censuses, the same shell API from PowerShell,
+// and a foreground-state comparison against a uniquely-pathed fixture copy with side-effect-
+// free foreground rechecks. Input-injection commands were removed from the fixture;
+// historical injected-input observations live in the report.
+const strictEffect = process.env.LOLPING_DESKTOP_EFFECT_STRICT === '1';
+const diagMode = process.env.LOLPING_DESKTOP_DIAG === '1';
 {
   const fixture = runFixture(fixtureExe, 'normal');
+  const t0 = Date.now();
+  const at = () => `t+${Date.now() - t0}ms`;
+  const observe = (ms) => fixture.next((l) => l === 'minimized' || l === 'restored', ms);
+  /** Aggregate desktop census (counts only) around an operation, for the diag log. */
+  const census = async (tag) => {
+    fixture.write('census');
+    const c = await fixture.next((l) => l.startsWith('census:'), 3000);
+    console.log(`diag  ${at()} census ${tag}: ${c ?? 'unavailable'}`);
+  };
+  const toggleOnce = async () => {
+    const r = await runHelper('{"type":"toggleDesktop"}\n');
+    return { reply: r.out.trim(), code: r.code };
+  };
+  /** Two toggle requests with a long observation window (slow delivery cannot hide). */
+  const togglePairObs = async (obs, label, beforeEach = async () => {}) => {
+    await beforeEach(1);
+    const a = await toggleOnce();
+    const first = await obs(10000);
+    await beforeEach(2);
+    const b = await toggleOnce();
+    const second = await obs(10000);
+    const bothWays = first && second && first !== second;
+    console.log(`diag  ${at()} ${label}: replies ${a.reply} / ${b.reply} (exit ${a.code}/${b.code}), ` +
+      `effect ${bothWays ? `${first} -> ${second}` : 'none'} (saw ${first ?? 'nothing'} then ${second ?? 'nothing'})`);
+    return {
+      okReplies: a.reply === '{"type":"result","status":"desktopToggled"}' && b.reply === '{"type":"result","status":"desktopToggled"}' && a.code === 0 && b.code === 0,
+      bothWays,
+    };
+  };
+  const togglePair = async (label) => {
+    if (diagMode) await census('before pair');
+    const r = await togglePairObs(observe, label);
+    if (diagMode) await census('after pair');
+    return r;
+  };
   try {
     const ready = await fixture.next((l) => l.startsWith('ready ') || l.startsWith('error '), 12000);
-    const r1 = await runHelper('{"type":"toggleDesktop"}\n');
-    let first = null;
-    if (ready && ready.startsWith('ready ')) first = await fixture.next((l) => l === 'minimized' || l === 'restored', 5000);
-    const r2 = await runHelper('{"type":"toggleDesktop"}\n');
-    let second = null;
-    if (ready && ready.startsWith('ready ')) second = await fixture.next((l) => l === 'minimized' || l === 'restored', 5000);
-    if (r1.out !== '{"type":"result","status":"desktopToggled"}\n' || r1.code !== 0) {
-      bad('toggleDesktop #1', `stdout=${JSON.stringify(r1.out)} exit=${r1.code}`);
-    } else if (r2.out !== '{"type":"result","status":"desktopToggled"}\n' || r2.code !== 0) {
-      bad('toggleDesktop #2', `stdout=${JSON.stringify(r2.out)} exit=${r2.code}`);
+    if (!ready || !ready.startsWith('ready ')) {
+      if (strictEffect) bad('strict desktop effect', `fixture unavailable: ${ready ?? 'never ready'}`);
+      else skip('toggleDesktop x2 (window observation)', `fixture unavailable: ${ready ?? 'never ready'}`);
+      const r1 = await toggleOnce();
+      const r2 = await toggleOnce();
+      if (r1.reply !== '{"type":"result","status":"desktopToggled"}' || r1.code !== 0) bad('toggleDesktop #1', `stdout=${r1.reply} exit=${r1.code}`);
+      else if (r2.reply !== '{"type":"result","status":"desktopToggled"}' || r2.code !== 0) bad('toggleDesktop #2', `stdout=${r2.reply} exit=${r2.code}`);
+      else ok('toggleDesktop x2 (desktopToggled, exit 0)');
     } else {
-      ok('toggleDesktop x2 (desktopToggled, exit 0)');
-      if (first && second && first !== second) {
-        ok(`toggleDesktop x2 with window observation (${first} -> ${second})`);
+      if (diagMode) {
+        // C1: does the observer see real window changes driven without the shell?
+        fixture.write('minimize');
+        const selfMin = await fixture.next((l) => l === 'minimized', 3000);
+        const exePath = ready.match(/^ready (\d+) (.+)$/)[2];
+        const act = await runHelper(`{"type":"activate","exePath":"${escapeJson(exePath)}"}\n`);
+        const selfRestore = await fixture.next((l) => l === 'restored', 5000);
+        console.log(`diag  ${at()} observer self-test: self-minimize ${selfMin ? 'seen' : 'MISSED'}, ` +
+          `helper-activate ${act.out.trim()}, restore ${selfRestore ? 'seen' : 'MISSED'}`);
+        if (!selfMin || !selfRestore) bad('diag observer self-test', 'fixture observer misses real window changes');
+        // Side-effect-free foreground sample (the canary probe is NOT used here: it spawns
+        // and activates another window, which would change the condition being measured).
+        fixture.write('fgown');
+        const fgOwn = await fixture.next((l) => l.startsWith('fg-own='), 3000);
+        console.log(`diag  ${at()} foreground sample before pair: ${fgOwn ?? 'unavailable'}`);
+      }
+
+      const helperPair = await togglePair('helper toggle pair');
+
+      if (diagMode && !helperPair.bothWays) {
+        // C3: same shell API from a different COM host with the same harness ancestry.
+        const ps = (await import('node:child_process')).spawnSync('powershell.exe',
+          ['-NoProfile', '-Command', '(New-Object -ComObject Shell.Application).ToggleDesktop(); Start-Sleep -Milliseconds 300; (New-Object -ComObject Shell.Application).ToggleDesktop()'],
+          { timeout: 30000 });
+        const p1 = await observe(6000);
+        const p2 = p1 ? await observe(6000) : null;
+        console.log(`diag  ${at()} powershell ToggleDesktop x2: exit=${ps.status} ` +
+          `err=${(ps.stderr || '').toString().trim().slice(0, 120)}, effect ${p1 && p2 && p1 !== p2 ? `${p1} -> ${p2}` : 'none'}`);
+        // No automated Win+D/Alt comparison: see the mode comment above and the diagnosis
+        // report - the historical injected-input observations are recorded there instead.
+      }
+
+      if (diagMode) {
+        // Controlled foreground state, WITHOUT the previous confounds: the fixture runs from
+        // a unique temporary path, so an activate-by-path request can only select this
+        // instance (earlier fixtures with the same exe path are not candidates), and the
+        // foreground condition is RE-CHECKED with the side-effect-free fg-own probe right
+        // before each comparison instead of trusting a one-time event.
+        const dir = mkdtempSync(join(tmpdir(), 'lolping-fg-probe-'));
+        let fg = null;
+        try {
+          const exe = join(dir, 'fixture_app.exe');
+          copyFileSync(fixtureExe, exe);
+          fg = runFixture(exe, 'normal');
+          const fgReady = await fg.next((l) => l.startsWith('ready '), 8000);
+          if (!fgReady) {
+            console.log(`diag  ${at()} foreground-state comparison: fixture copy never ready`);
+          } else {
+            const fgExe = fgReady.match(/^ready (\d+) (.+)$/)[2];
+            const act = await runHelper(`{"type":"activate","exePath":"${escapeJson(fgExe)}"}\n`);
+            const sawFg = await fg.next((l) => l === 'foreground', 5000);
+            fg.write('fgown');
+            const recheck = await fg.next((l) => l.startsWith('fg-own='), 3000);
+            console.log(`diag  ${at()} foreground-state comparison: activate ${act.out.trim()}, ` +
+              `one-time event ${sawFg ? 'seen' : 'not seen'}, recheck ${recheck ?? 'unavailable'}`);
+            const obsFg = (ms) => fg.next((l) => l === 'minimized' || l === 'restored', ms);
+            if (!recheck?.startsWith('fg-own=1 ')) {
+              console.log(`diag  ${at()} foreground-state comparison skipped: current foreground not confirmed`);
+            } else {
+              await togglePairObs(obsFg, 'helper pair, unique fixture with foreground samples', async (ordinal) => {
+                fg.write('fgown');
+                const before = await fg.next((l) => l.startsWith('fg-own='), 3000);
+                console.log(`diag  ${at()} foreground sample before toggle #${ordinal}: ${before ?? 'unavailable'}`);
+              });
+            }
+          }
+        } finally {
+          if (fg) await fg.killAndWait();
+          if (dirname(resolve(dir)) !== resolve(tmpdir()) || !basename(dir).startsWith('lolping-fg-probe-')) {
+            throw new Error('Unexpected foreground fixture cleanup path');
+          }
+          try {
+            rmSync(dir, { recursive: true, force: true });
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 500));  // exe lock release can lag exit
+            try {
+              rmSync(dir, { recursive: true, force: true });
+            } catch {
+              console.log(`note  foreground-probe temp dir left behind (locked): ${dir}`);
+            }
+          }
+        }
+      }
+
+      if (!helperPair.okReplies) {
+        bad('toggleDesktop x2', 'a toggle reply was not desktopToggled with exit 0 (see diag lines)');
+      } else if (strictEffect) {
+        if (helperPair.bothWays) ok('strict desktop effect: replies desktopToggled x2 AND window moved both ways');
+        else bad('strict desktop effect', 'desktopToggled answered but the owned window never moved both ways; effect unverified');
       } else {
-        skip('toggleDesktop window effect', `observation unavailable (ready=${ready ?? 'none'}, ` +
-          `saw ${first ?? 'nothing'} then ${second ?? 'nothing'}); both toggle results still asserted`);
+        ok('toggleDesktop x2 (desktopToggled, exit 0)');
+        if (helperPair.bothWays) ok('toggleDesktop window effect observed both ways');
+        else skip('toggleDesktop window effect', 'desktopToggled answered but the owned window did not move both ways in this session');
       }
     }
   } finally {

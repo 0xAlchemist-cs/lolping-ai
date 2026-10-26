@@ -29,5 +29,6 @@ if (action === 'build') run('cmd.exe', ['/d', '/c', '.\\build.cmd']);
 if (action === 'test') {
   run('cmd.exe', ['/d', '/c', '.\\build.cmd']);
   run(join(here, 'build', 'desktop_helper_tests.exe'), []);
+  run(process.execPath, [join(here, 'tests', 'fixture_commands.mjs')]);
   run(process.execPath, [join(here, 'tests', 'e2e.mjs')]);
 }

@@ -36,7 +36,8 @@ message. Nothing on another platform is ever reported as a Windows result.
 | `src/toggle_desktop.{h,cpp}` | COM `IShellDispatch4::ToggleDesktop` with balanced init/uninit. |
 | `tests/protocol_tests.cpp` | 101 unit checks for the pure protocol layer. |
 | `tests/e2e.mjs` | End-to-end checks through the real executable, including GUI fixture scenarios. |
-| `fixtures/fixture_app.cpp` | Controlled GUI fixture (normal / minimized / multi / hidden / noactivate / hung / vanish) that only creates and observes its own windows. |
+| `tests/fixture_commands.mjs` | Hidden-window parser/diagnostic checks; no desktop changes or injected input. |
+| `fixtures/fixture_app.cpp` | Owned GUI fixture plus bounded diagnostic commands and aggregate-only census; no keyboard injection. |
 
 ## Protocol decisions where the contract left room
 
@@ -154,16 +155,13 @@ rule and consistently activates in both states. Both suite states passed:
   `minimized -> restored` round-trip observation across the two toggles (the shell-state
   sensitivity described below had cleared by then; both behaviours were recorded)
 
-**ToggleDesktop effect observation.** Every run of the two mandated toggles answers
-`desktopToggled` with exit 0. In the morning session the fixture window observed a real
-`minimized -> restored` round trip across the pair. Later the same day, in the same Windows
-session, the shell accepts every toggle (S_OK) but no longer changes window states at all -
-verified manually with both a visible and a self-minimized fixture window, including after
-an unpaired toggle. The cause was not established by this observation.
-`desktopToggled` means the request was accepted, not that a gesture was verified. Re-check
-on a fresh session is a manual item. A run without the window-level round trip now reports
-that effect check as SKIPPED, separately from its passing request/response checks. It must
-not be described as completed desktop or hardware-gesture acceptance.
+**ToggleDesktop effect observation.** A `desktopToggled` reply means the request was
+accepted, not that the desktop changed. Both working round trips and reply-only failures
+have been observed on this live Windows session. Missing window effects remain a visible
+skip in the default native suite and a failure with `LOLPING_DESKTOP_EFFECT_STRICT=1`.
+The shell-state explanation is a hypothesis; neither its internal mechanism nor complete
+exclusion of application/caller effects has been established. See
+`docs/p3-desktop-diagnosis.md` and Codex's independent `docs/p3-desktop-review.md`.
 
 Codex acceptance also reproduced the foreground-denied outcome in both Node and Electron
 hosts, with hidden and non-hidden desktop children. The separate Electron wheel/native smoke
@@ -173,6 +171,33 @@ That result does not establish physical input-hook, UAC or mixed-DPI acceptance.
 The next strict smoke rerun failed: the first request returned `desktopToggled` but did
 not minimize the owned window. The independent native suite also observed no window
 effect without overlays. The cause remains unresolved; see `docs/p3-acceptance.md`.
+
+## Integrated diagnostic revision (2026-10-26)
+
+The fixture accepts exact LF/CRLF command lines of at most 16 bytes: `minimize`, `census`,
+`fgown` and `quit`. Binary, unknown, unterminated and overlong commands never execute.
+Each rejected physical line is counted once; bytes after an overlong prefix cannot become
+another command. `fgown` samples current foreground ownership without changing it.
+The unused `wind`/`alt` commands and all fixture `SendInput` code were removed during
+Codex integration. Historical injected comparisons in the report are not current tooling.
+
+`run.mjs test` runs the hidden-window command regression after the 101 protocol units and
+before the existing e2e suite. To check only the non-disruptive parts after building:
+
+```powershell
+node native/desktop-helper/run.mjs build
+native/desktop-helper/build/desktop_helper_tests.exe
+node native/desktop-helper/tests/fixture_commands.mjs
+```
+
+The focused check reports unavailable hidden windows explicitly; setting
+`LOLPING_FIXTURE_COMMANDS_STRICT=1` makes that condition fail local acceptance. Strict
+desktop mode still requires two successful replies AND actual window movement both ways.
+Diagnostic mode no longer injects shortcuts or runs an eligibility canary inside the
+foreground-state comparison. It uses an atomically unique fixture copy, fresh foreground
+samples and bounded cleanup restricted to that temporary directory. Current diagnostics
+remain unrun pending an agreed idle window; the previous strict failure remains open.
+Production helper sources/protocol and Main are unchanged by this diagnostic revision.
 
 ## Not verified here (manual / Codex acceptance items)
 
@@ -185,8 +210,8 @@ effect without overlays. The cause remains unresolved; see `docs/p3-acceptance.m
   run was performed.
 - Non-Windows platforms: only the explicit skip path exists; no cross-platform run.
 - Concurrent desktop-state changes (user pressing Win+D while the helper toggles).
-- ToggleDesktop window-level effect on a fresh Windows session (see the shell-state finding
-  above); acceptance is verified, the end-to-end gesture is a manual check.
+- ToggleDesktop effects in a clean Windows session and complete Main/gameplay flow;
+  successful replies alone do not complete acceptance.
 
 ## Known limitations
 

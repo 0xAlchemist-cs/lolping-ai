@@ -700,7 +700,7 @@ response before actual cancellation and observes settings persistence and helper
 The overlay/native smoke's `--no-input` option omits the test-only Alt tap for a separate
 caller-context comparison; it still requires actual minimize/restore effects. Diagnosis
 review and remaining blockers are recorded in `docs/p3-desktop-review.md`.
-Its `--latency` mode records 100 guarded OS-injected gestures from real input-helper
+The complete-Main smoke's `--latency` mode records 100 guarded OS-injected gestures from real input-helper
 stdout receipt in Main to the controlled `shell.openExternal` boundary. Browser startup,
 physical input and native application/desktop actions are outside that measurement.
 `tools/ping-actions-idle-benchmark.cjs` compares an exported, built baseline with the current
@@ -709,3 +709,7 @@ and no settings window. It samples only owned Electron/input processes, excludes
 with changed process identities or recent session input, and reports insufficient idle
 samples as incomplete. Raw snapshots and timing scope are described in
 `docs/p3-performance-verification.md`; these tools never run in the product.
+The desktop fixture's hidden-window command regression runs before native e2e. It checks
+bounded command parsing, NUL/long-line rejection and foreground sampling without showing
+windows, toggling the desktop or injecting input. Unused fixture injection commands were
+removed; strict desktop-effect acceptance remains separate.

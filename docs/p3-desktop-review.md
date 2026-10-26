@@ -115,6 +115,26 @@ effects or HTTP). These passing checks do not override either strict failure.
 
 ## Remaining acceptance
 
+### Integrated follow-up
+
+Zcode returned the revised report and non-input diagnostics. Codex integrated that work,
+then reproduced another parser defect before accepting it: the 70-byte invalid-line case
+was counted twice by the `fgets` implementation. A bounded physical-line reader now
+drains/rejects the line once; NUL and long-line quit suffixes cannot become commands.
+The unused Win+D/Alt implementations were removed entirely after the keyup-result review.
+
+The integrated fixture exposes only `minimize`, `census`, `fgown` and `quit`. Its focused
+hidden-window regression passed all 15 cases after a real failing run; 101 protocol
+units passed, and the `/W4 /WX` build was clean. The standard native test entry includes
+the focused checks before e2e. The optional foreground comparison uses an atomically
+unique copy, fresh samples before each request, explicit unavailable-state reporting
+and cleanup restricted to its known temporary directory. Root's newer module README
+history was retained. See `p3-desktop-diagnosis.md` for the attributed observations.
+
+This accepts the diagnostic revision and parser fix. Revised strict/diag desktop runs
+remain unrun pending an agreed idle window; the earlier failures are not cleared by
+protocol, parser or code-review results.
+
 The desktop-effect blocker is still reproduced. Resolve it with supported behavior and
 repeatable effects before P3A completion. Full Main plus actual desktop actions, two
 real wheel operations including existing AI cards, physical mouse, UAC/elevated targets,
