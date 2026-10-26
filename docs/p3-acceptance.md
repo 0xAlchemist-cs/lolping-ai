@@ -5,9 +5,9 @@ Worktree: `D:/lolping/lolPing-p3`, branch `feat/p3a-windows-actions`.
 
 P3 code is available for review, with the feature off by default. **P3 is not accepted for
 completion or release.** The desktop effect is not stable in this Windows session, and
-the required physical-input, elevated-target and mixed-DPI checks remain open. Keep the PR
-in draft until the blocking items below are resolved. No merge, release or version change
-is part of this checkpoint.
+the required physical-input, elevated-target and mixed-DPI checks remain open. Work stays
+local under the user's latest direction; do not create or update a PR. No merge, release
+or version change is part of this checkpoint.
 
 ## Automated evidence run by Codex
 
@@ -30,6 +30,7 @@ Existing dependencies were reused through the local junction; no lockfile change
 | `node tools/clipboard-smoke.cjs` | PASS | Controlled clipboard cases; fixture output only |
 | `node tools/settings-input-smoke.cjs` | PASS | Real Fluent controls, controlled settings IPC |
 | `node tools/quick-actions-smoke.cjs` | PASS | Real Fluent controls; 3 saves, 2 synthetic tests, 3 picks, 1 removal; bilingual/platform/stale-draft guards |
+| `node tools/ping-actions-hook-smoke.cjs` | 17 cases passed, exit 0 | Unchanged real input helper → InputBridge → production overlay/preload → executor; OS-injected input, open operation stubbed, Main availability harnessed; 11 releases, 10 wheel Pings, 7 recorded actions; no desktop effects |
 | `node tools/ping-actions-smoke.cjs --dispatch-only` | 100 samples; P50 3.30ms, P95 10.83ms, max 13.25ms; exit 0 | Production overlay/preload IPC from Main release to executor's native-request boundary; native result stubbed, no desktop effects or physical gesture |
 | `electron-builder --win --x64 --dir --publish never` | exit 0 | Current integrated unpacked Windows build, cached Electron artifact |
 | `electron-builder --win --x64 --publish never` with workspace `ELECTRON_BUILDER_CACHE` | exit 0 | Full NSIS installer, 171859906 bytes; downloaded standard NSIS/7zip resources; not installed or published |
@@ -75,7 +76,9 @@ actions, inject production shortcuts or suppress existing features to obtain a p
 - Resolve the intermittent no-effect desktop behavior and record repeatable two-gesture
   desktop restoration in the full app, including existing AI cards and other overlays.
 - Physical mouse with the existing trigger keys and side buttons; click/pass-through,
-  center/Esc/right-click cancellation, pause and settings key capture.
+  center/Esc/right-click cancellation, pause and settings key capture. The controlled
+  real-hook checks now pass with OS-injected input; see `p3-input-verification.md` for
+  scope and limits, including the unexercised complete Main entry point.
 - Ordinary, minimized, tray-only and multiple application windows, launchers, denied
   activation, and UAC/elevated targets. Controlled fixtures cover part of this matrix.
 - 100/150/200% DPI, mixed monitors, cross-screen gestures, monitor removal and display-mode

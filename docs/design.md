@@ -684,3 +684,9 @@ checks expose skipped observations when the session cannot provide foreground or
 The smoke's `--dispatch-only` mode measures 100 production-overlay IPC round trips to a stubbed
 native request boundary. It never toggles the desktop and is separate from full-app performance
 and physical input acceptance.
+`tools/ping-actions-hook-smoke.cjs` instead runs the unchanged real input helper and feeds
+its stdout events through InputBridge to the production overlay and preload. A guarded
+driver injects input only at an owned foreground window. It covers the existing keyboard/
+side-button triggers, cancellations, single-click isolation, capture and pause pass-through,
+binding gates and icon rearrangement. URL opening and Main availability are harnessed;
+no physical, full-app-entry-point or actual desktop-effect result is inferred.
