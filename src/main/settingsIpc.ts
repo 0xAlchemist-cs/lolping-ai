@@ -6,16 +6,17 @@ import { hotkeyLabel, hotkeyToAccelerator, type Hotkey } from '../shared/keys';
 import { pingById, type PingId } from '../shared/pings';
 import type { Platform } from '../shared/platform';
 import type { JoinResult, RoomState } from '../shared/room';
-import { panelKeyClashes, patchClashes, rendererPatch } from '../shared/settings';
+import { mergeSettings, panelKeyClashes, patchClashes, rendererPatch } from '../shared/settings';
 import type { UpdateState } from '../shared/update';
 import { emoteFileFrom, type EmoteLibrary } from './emoteLibrary';
 import type { SettingsStore } from './settingsStore';
+import { PROJECT_URL, RELEASES_PAGE } from '../shared/project';
 
-const PROJECT_URL = 'https://github.com/0xAlchemist-cs/lolping-ai';
 /** Where "What's new" goes when no update is known. */
-export const LATEST_RELEASE_URL = 'https://github.com/darrenprx/lolPing/releases/latest';
+export const LATEST_RELEASE_URL = `${RELEASES_PAGE}/latest`;
 
 export interface SettingsIpcDeps {
+  setLoginItem?(enabled: boolean): void;
   store: SettingsStore;
   /** Imported emotes' files. Only the import, remove, sound and fx handlers change `customEmotes`. */
   library: EmoteLibrary;
@@ -106,6 +107,11 @@ export function registerSettingsIpc(d: SettingsIpcDeps): void {
       }
       const error = hotkeyConflict(patch.textHotkey, d.store.get().textHotkey, d.text(), d.platform);
       if (error) return { ok: false, error, settings: d.store.get() };
+    }
+    const startup = mergeSettings(d.store.get(), patch).launchAtStartup;
+    if (startup !== d.store.get().launchAtStartup) {
+      try { d.setLoginItem?.(startup); }
+      catch { return { ok: false, error: d.text().loginItemFailed, settings: d.store.get() }; }
     }
     return { ok: true, settings: d.store.update(patch) };
   });

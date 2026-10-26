@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag that matches package.json's version (for example v0.2.0) to build both installers and publish them.
+# Push a tag matching package.json's version to build all platform packages and publish them.
 on:
   push:
     tags: ['v*']
@@ -37,9 +37,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run typecheck
       - run: npm run test:helper
+        env:
+          CL: -utf-8 /Zc:preprocessor
+      - run: npm run test:desktop
       - run: npm test
       - run: npm run dist
+      - run: npx vitest run tests/main/preloadBundle.test.ts
+      - run: node tools/verify-desktop-package.cjs release/win-unpacked/resources
       - name: Upload the installer and its update files
         shell: bash
         env:
@@ -64,6 +70,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run typecheck
       - run: npm run test:helper
       - run: npm test
       - run: npm run dist:mac
@@ -73,9 +80,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" "release/lolPing-${GITHUB_REF_NAME#v}-arm64.dmg" --clobber
 
-  # Both installers and the update files are uploaded: only now does the draft become the latest release.
+  linux:
+    needs: release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxtst-dev xvfb
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:helper
+      - run: npm run test:linux-input
+      - run: npm test
+      - run: npm run dist:linux
+      - name: Upload Linux packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" release/*.AppImage release/*.deb --clobber
+
+  # Publish only after every platform and the update files have finished uploading.
   publish:
-    needs: [windows, mac]
+    needs: [windows, mac, linux]
     runs-on: ubuntu-latest
     steps:
       - name: Publish the release

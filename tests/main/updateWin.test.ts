@@ -19,7 +19,7 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-const INFO: UpdateInfo = { version: '0.5.1', notesUrl: 'https://github.com/darrenprx/lolPing/releases/tag/v0.5.1' };
+const INFO: UpdateInfo = { version: '0.5.1', notesUrl: 'https://github.com/0xAlchemist-cs/lolping-ai/releases/tag/v0.5.1' };
 
 /** The parts of electron-updater's AppUpdater that WinBackend uses. */
 class FakeUpdater extends EventEmitter {
@@ -72,7 +72,7 @@ describe('WinBackend setup', () => {
     make();
     expect(fake.autoDownload).toBe(false);
     expect(fake.autoInstallOnAppQuit).toBe(false);
-    expect(fake.setFeedURL).not.toHaveBeenCalled();
+    expect(fake.setFeedURL).toHaveBeenCalledWith({ provider: 'github', owner: '0xAlchemist-cs', repo: 'lolping-ai' });
     expect(fake.forceDevUpdateConfig).toBe(false);
   });
 

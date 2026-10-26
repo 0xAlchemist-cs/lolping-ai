@@ -33,9 +33,15 @@ export const assetPath = (...parts: string[]): string =>
 
 export const settingsDir = (): string => join(app.getPath('appData'), 'lolPing');
 
+const developmentRendererUrl = (): string | undefined =>
+  app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL;
+
+export const rendererRootPath = (): string | null =>
+  developmentRendererUrl() ? null : join(__dirname, '../renderer');
+
 /** Where `page` is served from: the Vite dev server in development, lolping://app in production. `hash` is without the #. */
 export function pageUrl(page: Page, hash = ''): string {
-  const devUrl = process.env.ELECTRON_RENDERER_URL;
+  const devUrl = developmentRendererUrl();
   const suffix = hash ? `#${hash}` : '';
   return devUrl ? `${devUrl}/${page}/index.html${suffix}` : `${APP_SCHEME}://app/${page}/index.html${suffix}`;
 }

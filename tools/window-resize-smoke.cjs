@@ -106,6 +106,7 @@ if (!process.versions.electron) {
   app.whenReady().then(async () => {
     const root = process.env.LOLPING_RESIZE_SMOKE_ROOT;
     if (!root) throw new Error('launcherRequired');
+    app.setAppPath(root);
     let externalRequests = 0;
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
       const external = !details.url.startsWith('data:');

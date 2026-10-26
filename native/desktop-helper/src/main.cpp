@@ -11,6 +11,7 @@
 #include "activate.h"
 #include "protocol.h"
 #include "toggle_desktop.h"
+#include "window_dwm.h"
 
 namespace {
 
@@ -64,8 +65,12 @@ int wmain() {
         exitCode = 1;
       } else if (req.kind == dhp::Request::Kind::Activate) {
         exitCode = runActivate(req.exePathUtf8, result);
-      } else {
+      } else if (req.kind == dhp::Request::Kind::ShowDesktop) {
         exitCode = runShowDesktop(result);
+      } else if (req.kind == dhp::Request::Kind::FlushComposition) {
+        exitCode = runFlushComposition(result);
+      } else {
+        exitCode = runStyleWindow(req.hwnd, req.ownerPid, result);
       }
       break;
     }

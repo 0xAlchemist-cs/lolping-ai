@@ -74,7 +74,8 @@ function run() {
   app.setPath('userData', join(runDir, 'profile'));
   app.commandLine.appendSwitch('disable-background-networking');
   const realSpawn = cp.spawn;
-  const urls = [], hookEvents = [], wheelPings = [], nativeJobs = [], inputChildren = [], scenarios = [], cancellationMs = [];
+  const urls = [], hookEvents = [], wheelPings = [], nativeJobs = [], systemJobs = [], inputChildren = [], scenarios = [], cancellationMs = [];
+  let unexpectedNativeJobs = 0;
   const releaseToUrlRequestMs = [];
   let latencySummary = null;
   let measuringLatency = false, releasedAt = null, releaseConsumed = true;
@@ -91,6 +92,7 @@ function run() {
     browserOpenStubbed: true, pickerDialogStubbed: true, nativeActivationChildStubbed: true,
     desktopEffectsVerified: false, inputExited: inputChildren.length === 1 && inputChildren.every(child => child.exitCode !== null || child.signalCode !== null),
     scenarios, wheelPings: wheelPings.length, recordedUrls: urls.length, nativeJobs: nativeJobs.length,
+    nativeSystemJobs: systemJobs.length, nativeSystemBoundaryStubbed: true, unexpectedNativeJobs,
     programLaunches, cancellationMs, releaseToUrlRequestMs, latencySummary, fixtureActivationClicks: activationClicks, mainFetches, externalRequests }));
   const wait = async (condition, why) => {
     const deadline = Date.now() + 8000;
@@ -126,7 +128,14 @@ function run() {
   check(dialog.showOpenDialog === selectFixture, 'pickerBoundaryNotControlled');
   const fakeNative = join(runDir, 'native-job.cjs');
   writeFileSync(fakeNative, `let text='';process.stdin.on('data',part=>text+=part);process.stdin.on('end',()=>{
-const request=JSON.parse(text);if(request.type!=='activate')process.exit(1);process.send({waiting:true});});
+const request=JSON.parse(text);
+if(request.type==='activate'){process.send({waiting:true});return;}
+const validFlush=request.type==='flushComposition'&&Object.keys(request).length===1;
+const validStyle=request.type==='styleWindow'&&Object.keys(request).length===3
+&&/^[1-9][0-9]*$/.test(request.hwnd)&&request.ownerPid===String(process.ppid);
+if(!validFlush&&!validStyle)process.exit(1);
+process.send({system:request.type});process.stdout.write(JSON.stringify({type:'result',status:validFlush?'compositionFlushed':'frameStyled'})+'\\n');
+process.disconnect();});
 process.on('message',message=>{if(message==='probe')process.send({probed:true});});`);
   cp.spawn = (command, args, options) => {
     const file = basename(command).toLowerCase();
@@ -149,13 +158,16 @@ process.on('message',message=>{if(message==='probe')process.send({probed:true});
       const child = realSpawn(process.execPath, [fakeNative], { ...options,
         env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
       const job = { child, started: performance.now(), waiting: false, ended: false };
-      nativeJobs.push(job);
-      checkpoint('nativeSpawned');
       child.on('message', message => {
-        if (message?.waiting) { job.waiting = true; checkpoint('nativeWaiting'); }
+        if (message?.waiting) { job.waiting = true; nativeJobs.push(job); checkpoint('nativeWaiting'); }
+        if (message?.system) { job.system = true; systemJobs.push(job); }
         if (message?.probed) job.probed = true;
       });
-      child.on('close', () => { job.ended = true; checkpoint('nativeEnded'); });
+      child.on('close', () => {
+        job.ended = true;
+        if (!job.waiting && !job.system) unexpectedNativeJobs++;
+        checkpoint('nativeEnded');
+      });
       return child;
     }
     programLaunches++;
@@ -343,7 +355,7 @@ report:()=>ipcRenderer.send(${JSON.stringify(OVERLAY_QUICK_ACTION)},{sessionId:9
         return { pending, job };
       };
       stage = 'settingsCloseCancelsNative';
-      check(nativeJobs.length === 0, 'nonAppActionSpawnedDesktopHelper');
+      check(nativeJobs.length === 0 && unexpectedNativeJobs === 0, 'nonAppActionSpawnedNativeActivation');
       await saveApp();
       let active = await pendingNative();
       await invoke('setCapturing', false);

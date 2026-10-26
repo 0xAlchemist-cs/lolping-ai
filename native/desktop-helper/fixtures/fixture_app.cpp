@@ -190,6 +190,7 @@ int runMode(const std::string& mode) {
   wchar_t self[MAX_PATH];
   const DWORD n = GetModuleFileNameW(nullptr, self, MAX_PATH);
   emit("ready " + std::to_string(GetCurrentProcessId()) + " " + toUtf8(std::wstring(self, n)));
+  emit("hwnd " + std::to_string(reinterpret_cast<UINT_PTR>(windows[0])));
 
   bool sawForeground = false;
   bool iconic[2] = {false, false};

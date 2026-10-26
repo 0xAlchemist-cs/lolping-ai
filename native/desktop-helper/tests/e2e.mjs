@@ -336,6 +336,27 @@ if (!probeReady || probeReady.startsWith('error ')) {
   }
 }
 
+// DWM operations use only the owned fixture and fixed native APIs, never a system shell.
+await expectResult('style refuses invalid window identity',
+  '{"type":"styleWindow","hwnd":"1","ownerPid":"1"}\n', ERR('osError', 2147942405), 1);
+{
+  const owned = runFixture(fixtureExe, 'normal');
+  try {
+    const ready = await owned.next((line) => line.startsWith('ready '), 8000);
+    const handle = await owned.next((line) => line.startsWith('hwnd '), 3000);
+    if (!ready || !handle) skip('style owned window', 'no interactive fixture window');
+    else {
+      const ownerPid = ready.match(/^ready (\d+) /)[1];
+      await expectResult('style owned window', JSON.stringify({ type: 'styleWindow', hwnd: handle.slice(5), ownerPid }) + '\n',
+        '{"type":"result","status":"frameStyled"}', 0);
+      await expectResult('style rejects foreign PID', JSON.stringify({ type: 'styleWindow', hwnd: handle.slice(5), ownerPid: '1' }) + '\n',
+        ERR('osError', 2147942405), 1);
+      await expectResult('flush desktop composition', '{"type":"flushComposition"}\n',
+        '{"type":"result","status":"compositionFlushed"}', 0);
+    }
+  } finally { await owned.killAndWait(); }
+}
+
 // --- one-way desktop clearing (disruptive: run last) -------------------------------------
 // Strict mode requires real window effects, not just shell acceptance. The second request
 // must keep the window minimized. After explicitly restoring OUR fixture, a third must clear

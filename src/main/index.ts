@@ -35,6 +35,7 @@ import { withCaptureWindowsHidden } from './captureWindows';
 import { isFile } from './fileState';
 import { InputBridge } from './inputBridge';
 import { DesktopBridge } from './desktopBridge';
+import { closeDesktopSystemTasks } from './desktopSystem';
 import { QuickActionExecutor } from './quickActionExecutor';
 import { launchQuickActionProgram, verifyQuickActionProgram } from './quickActionProgram';
 import { registerQuickActionsIpc } from './quickActionsIpc';
@@ -42,7 +43,7 @@ import { LanTransport } from './lanTransport';
 import { RELAYS } from './relays';
 import { RelayTransport } from './relayTransport';
 import { OverlayManager, type SharedEmote, type SharedPing } from './overlayManager';
-import { assetPath, buildResourcePath, desktopHelperExePath, helperExePath, IS_LINUX, IS_MAC, PLATFORM, settingsDir } from './paths';
+import { assetPath, buildResourcePath, desktopHelperExePath, helperExePath, IS_LINUX, IS_MAC, PLATFORM, rendererRootPath, settingsDir } from './paths';
 import { deriveRoomKeys } from './roomCrypto';
 import { RoomHistory } from './roomHistory';
 import { PanelWindows } from './panelWindows';
@@ -59,6 +60,7 @@ import { MacBackend, RELEASES_API } from './updateMac';
 import { WinBackend } from './updateWin';
 import { Updater } from './updater';
 import { setLinuxAutostart } from './linuxAutostart';
+import { syncWindowsLoginItem } from './windowsLoginItem';
 
 const ACCESSIBILITY_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
 
@@ -108,7 +110,7 @@ function start(): void {
   const cache = new EmoteCache(join(settingsDir(), 'emote-cache'), Date.now);
   void cache.present();
   serveAppScheme({
-    rendererRoot: process.env.ELECTRON_RENDERER_URL ? null : join(__dirname, '../renderer'), // development pages come from Vite
+    rendererRoot: rendererRootPath(),
     emoteDirs: () => [library.dir, cache.dir], // the library wins; the cache only fills the gaps
   });
   if (IS_MAC) {
@@ -117,6 +119,17 @@ function start(): void {
   }
   const store = new SettingsStore(settingsDir(), undefined, PLATFORM, { name: osUserName(), color: randomInt(8) });
   let settings = store.load();
+  const loginItemBackend = {
+    read: (options: { path: string; args: string[] }) => app.getLoginItemSettings(options),
+    write: (options: Parameters<typeof app.setLoginItemSettings>[0]) => app.setLoginItemSettings(options),
+  };
+  let loginItemFailed = false;
+  if (app.isPackaged && PLATFORM === 'win') {
+    try {
+      const actual = syncWindowsLoginItem(settings.launchAtStartup, process.execPath, loginItemBackend);
+      if (actual !== settings.launchAtStartup) settings = store.update({ launchAtStartup: actual });
+    } catch { loginItemFailed = true; }
+  }
   // An imported emote whose still is gone is dropped; normalising the shorter list repairs the wheel slots that used it.
   const kept = library.present(settings.customEmotes);
   if (kept.length !== settings.customEmotes.length) settings = store.update({ customEmotes: kept });
@@ -139,6 +152,7 @@ function start(): void {
       }),
   );
   overlays.start();
+  if (loginItemFailed) overlays.toast(text().launchAtStartup, text().loginItemFailed);
   const bridge = new InputBridge({ command: helperExePath() });
   const desktop = new DesktopBridge({ command: desktopHelperExePath() });
   const quickExecutor = new QuickActionExecutor({
@@ -182,7 +196,7 @@ function start(): void {
   powerMonitor.on('unlock-screen', () => { screenLocked = false; syncQuickActions(); });
 
   // Updates: only in an installed build, or in a development build pointed at a test server with LOLPING_UPDATE_TEST_URL.
-  const testUrl = process.env.LOLPING_UPDATE_TEST_URL || undefined;
+  const testUrl = app.isPackaged ? undefined : process.env.LOLPING_UPDATE_TEST_URL || undefined;
   // Linux packages are updated manually until a Linux release feed is published.
   const updater = !IS_LINUX && (app.isPackaged || testUrl) ? createUpdater() : null;
   function createUpdater(): Updater {
@@ -726,20 +740,15 @@ function start(): void {
       room.setInternetAllowed(s.allowInternet);
       pushRoom();
     }
-    if (app.isPackaged && s.launchAtStartup !== previous.launchAtStartup) {
-      // macOS ignores args, and a Mac launch starts in the menu bar anyway.
-      if (IS_LINUX) {
-        try { setLinuxAutostart(s.launchAtStartup); }
-        catch (err) {
-          console.error('[autostart]', err);
-          void dialog.showMessageBox({ type: 'error', message: String(err) });
-        }
-      }
-      else app.setLoginItemSettings(IS_MAC ? { openAtLogin: s.launchAtStartup } : { openAtLogin: s.launchAtStartup, args: ['--hidden'] });
-    }
   });
 
   registerSettingsIpc({
+    setLoginItem: (enabled) => {
+      if (!app.isPackaged) return;
+      if (IS_LINUX) setLinuxAutostart(enabled);
+      else if (IS_MAC) app.setLoginItemSettings({ openAtLogin: enabled });
+      else syncWindowsLoginItem(enabled, process.execPath, loginItemBackend, true);
+    },
     store,
     library,
     ai: {
@@ -832,6 +841,7 @@ function start(): void {
     quitting = true;
     quickExecutor.close();
     desktop.close();
+    closeDesktopSystemTasks();
     clearProgramSelections();
     event.preventDefault();
     updater?.stop(); // aborts a download and drops a check in flight; an install that is quitting the app is left alone
