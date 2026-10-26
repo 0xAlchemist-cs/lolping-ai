@@ -83,6 +83,36 @@ async function expectCode(p: Promise<unknown>, code: string): Promise<void> {
 }
 
 describe('streamChat', () => {
+  it('rejects a malformed content event instead of silently reporting a shortened answer as complete', async () => {
+    const seen: string[] = [];
+    await expectCode(streamChat(request({ onDelta: text => seen.push(text), fetchImpl: async () => ({
+      ok: true, status: 200, body: sse([chunk('visible prefix'), 'data: {"choices":broken}\n\n',
+        chunk('later text'), 'data: [DONE]\n\n']),
+    }) })), 'badResponse');
+    expect(seen).toEqual(['visible prefix']);
+  });
+  it.each([false, true])('identifies an explicit output-token limit with visible content=%s after DONE', async (visible) => {
+    const seen: string[] = [];
+    const frames = [visible ? chunk('partial answer') : 'data: {"choices":[{"delta":{"reasoning_content":"hidden"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n', 'data: [DONE]\n\n'];
+    await expectCode(streamChat(request({ onDelta: text => seen.push(text), fetchImpl: async () => ({
+      ok: true, status: 200, body: sse(frames),
+    }) })), 'outputLimit');
+    expect(seen).toEqual(visible ? ['partial answer'] : []);
+  });
+
+  it('does not treat a length finish reason as DONE when the stream ends prematurely', async () => {
+    await expectCode(streamChat(request({ fetchImpl: async () => ({ ok: true, status: 200,
+      body: sse([chunk('partial'), 'data: {"choices":[{"finish_reason":"length"}]}\n\n']),
+    }) })), 'badResponse');
+  });
+
+  it('allows an empty length-limited one-token connection probe', async () => {
+    await pingEndpoint(request({ fetchImpl: async () => ({ ok: true, status: 200,
+      body: sse(['data: {"choices":[{"finish_reason":"length"}]}\n\n', 'data: [DONE]\n\n']),
+    }) }));
+  });
+
   it('routes a null handler to an empty one-token text probe without supplied images', async () => {
     const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, body: sse(['data: [DONE]\n\n']) }));
     await runChat({ ...request({ images: [image()], fetchImpl }), onDelta: null });
@@ -207,11 +237,9 @@ describe('streamChat', () => {
       body: sse(['{"error":{"message":"secret body"}}']) }) })), 'server');
   });
 
-  it('ignores malformed events but rejects an unfinished event at EOF', async () => {
-    const seen: string[] = [];
-    await streamChat(request({ onDelta: (t) => seen.push(t), fetchImpl: async () => ({ ok: true, status: 200,
-      body: sse(['data: invalid json\n\n', chunk('answer'), 'data: [DONE]\n\n']) }) }));
-    expect(seen).toEqual(['answer']);
+  it('rejects malformed events and an unfinished event at EOF', async () => {
+    await expectCode(streamChat(request({ fetchImpl: async () => ({ ok: true, status: 200,
+      body: sse(['data: invalid json\n\n', chunk('answer'), 'data: [DONE]\n\n']) }) })), 'badResponse');
     await expectCode(streamChat(request({ fetchImpl: async () => ({ ok: true, status: 200,
       body: sse([chunk('answer'), 'data: [DONE]\n']) }) })), 'badResponse');
   });

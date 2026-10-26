@@ -14,7 +14,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
-html, body { width: 100%; height: 100%; overflow: hidden; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
 body {
   margin: 0;
   font: 13px/1.55 'Segoe UI', 'Microsoft YaHei', sans-serif;

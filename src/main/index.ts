@@ -25,7 +25,9 @@ import { EmoteLibrary, resolveEmoteArt } from './emoteLibrary';
 import { EmoteTransfer } from './emoteTransfer';
 import { checkEndpoint, guardResolvedAddresses, isExplicitLoopback, validModel, type AiErrorCode } from '../shared/aiConfig';
 import { closeExplainWindow, openExplainWindow, registerExplainWindow, type VisionUpload } from './explainWindow';
-import { AiRequests } from './aiRequest';
+import { AiRequests, createExplainAsk } from './aiRequest';
+import { createAiDiagnostics } from './aiDiagnostics';
+import type { CancelSource } from './aiClient';
 import { AiKeyStore } from './aiKeyStore';
 import { captureVision } from './visionCapture';
 import { withCaptureWindowsHidden } from './captureWindows';
@@ -361,7 +363,7 @@ function start(): void {
   const aiAllowLocal = !app.isPackaged && process.env.LOLPING_AI_ALLOW_LOCALHOST === '1';
   const aiConfigured = (): boolean =>
     featureOn(settings, 'aiExplain') && settings.aiBaseUrl.length > 0 && settings.aiModel.length > 0 && aiHasKey;
-  const aiCancel = (): void => aiRequests.cancel();
+  const aiCancel = (source?: CancelSource): void => aiRequests.cancel(source);
   /** Everything checked before any bytes leave: endpoint shape, model, key, and the DNS answer for the host. */
   async function aiPrepare(): Promise<
     { ok: true; baseUrl: string; model: string; key: string } | { ok: false; code: AiErrorCode }
@@ -394,11 +396,11 @@ function start(): void {
   ): Promise<{ ok: true } | { ok: false; code: AiErrorCode }> {
     return aiRequests.run(question, maxTokens, onDelta, upload);
   }
+  const aiDiagnostics = createAiDiagnostics(app.isPackaged, process.env.LOLPING_AI_DIAGNOSTICS,
+    line => console.info('[ai-diagnostic]', line));
   registerExplainWindow({
-    ask: (question, id, sink, upload) => {
-      void aiRun(question, 1024, (t) => sink({ kind: 'delta', id, text: t }), upload)
-        .then((r) => sink(r.ok ? { kind: 'done', id } : { kind: 'error', id, code: r.code }));
-    },
+    ask: createExplainAsk(aiRequests, aiDiagnostics.enabled ? aiDiagnostics.stream : undefined, () => settings.aiMaxTokens),
+    diagnostics: aiDiagnostics,
     cancel: aiCancel,
     configured: aiConfigured,
     openSettings: () => openSettingsWindow('features'),

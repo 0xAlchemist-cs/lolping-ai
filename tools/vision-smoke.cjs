@@ -55,6 +55,7 @@ function runElectron() {
   let externalRequests = 0;
   let fetchCalls = 0;
   let clipboardWrites = 0;
+  let clipboardDiagnostic = null;
   let fileWrites = 0;
   let asks = 0;
   let cancels = 0;
@@ -272,6 +273,13 @@ function runElectron() {
         check(await evaluate('document.getElementById("visionPrivacy").textContent') === words.vision.privacy,
           'privacyLabelMissing');
         check(card.isResizable() && card.isMaximizable(), 'windowResizeUnavailable');
+        if (process.platform === 'win32') {
+          const border = await evaluate('getComputedStyle(document.querySelector(".card")).borderTopColor');
+          const rgb = border.match(/\d+/g)?.slice(0, 3).map(Number);
+          const expectedBorder = rgb && '#' + rgb.map(value => value.toString(16).padStart(2, '0')).join('');
+          const accent = card.getAccentColor();
+          check(typeof accent === 'string' && accent.toLowerCase() === expectedBorder, 'nativeFrameColorMismatch');
+        }
         check(await evaluate('getComputedStyle(document.querySelector(".titlebar")).webkitAppRegion === "drag"'
           + ' && getComputedStyle(document.getElementById("close")).webkitAppRegion === "no-drag"'), 'windowDragRegionBroken');
         const originalCardSize = card.getSize();
@@ -327,11 +335,35 @@ function runElectron() {
         pendingAnswer.sink({ kind: 'done', id: pendingAnswer.id });
         await waitUntil(() => evaluate('document.getElementById("body").textContent === "Synthetic answer"'
           + ' && !document.getElementById("copy").disabled'), 'textStreamingBroken');
+        await clipboard.writeText('Synthetic copy seed');
+        check(await evaluate('document.getElementById("body").textContent === "Synthetic answer"'), 'copySourceChanged');
+        const copyStarted = Date.now();
         await evaluate('document.getElementById("copy").click()');
-        await waitUntil(() => evaluate(`document.getElementById("copied").textContent === ${JSON.stringify(words.copied)}`),
+        await waitUntil(() => evaluate(`document.getElementById("copied").textContent === ${JSON.stringify(words.copied)}`
+          + ' && !document.getElementById("copy").disabled'),
           'answerCopyFailed');
         const copiedAnswer = await clipboard.readText();
+        if (copiedAnswer !== 'Synthetic answer') {
+          const rendererCopy = await evaluate('navigator.clipboard.readText().then(text=>({matches:text==="Synthetic answer",length:text.length,readable:true}),'
+            + '()=>({matches:false,length:null,readable:false}))');
+          const secondRead = await clipboard.readText();
+          clipboardDiagnostic = { firstType: typeof copiedAnswer, firstLength: copiedAnswer?.length ?? null,
+            rendererMatches: rendererCopy.matches, rendererLength: rendererCopy.length,
+            rendererReadable: rendererCopy.readable, stage: 'after-ui-success', sequence: 1,
+            expectedLength: 16, elapsedMs: Date.now() - copyStarted, focused: card.isFocused(), pid: process.pid,
+            secondMatches: secondRead === 'Synthetic answer', secondLength: secondRead?.length ?? null };
+        }
         check(copiedAnswer === 'Synthetic answer', 'answerCopyMismatch');
+        pendingAnswer = null;
+        await evaluate('document.getElementById("ask").requestSubmit()');
+        await waitUntil(() => pendingAnswer, 'limitedAskMissing');
+        pendingAnswer.sink({ kind: 'delta', id: pendingAnswer.id, text: 'Partial synthetic answer' });
+        pendingAnswer.sink({ kind: 'error', id: pendingAnswer.id, code: 'outputLimit' });
+        await waitUntil(() => evaluate('document.getElementById("body").textContent === "Partial synthetic answer"'
+          + ` && document.getElementById("hint").textContent === ${JSON.stringify(words.errors.outputLimit)}`
+          + ' && document.getElementById("hint").classList.contains("warn")'
+          + ' && !document.getElementById("copy").disabled && !document.getElementById("send").disabled'
+          + ' && document.getElementById("stop").hidden'), 'outputLimitWarningMissing');
         pendingAnswer = null;
         const cancelsBefore = cancels;
         await evaluate('document.getElementById("ask").requestSubmit()');
@@ -344,7 +376,7 @@ function runElectron() {
         results.push({ ...lastCapture, scaleFactor: display.scaleFactor, movedCursor,
           sandboxPreloads: 'PASS', syntheticWheelAndPing: 'PASS', exclusionAndRestore: 'PASS',
           imageRelease: 'PASS', textStreamAndStop: 'PASS', syntheticAnswerCopy: 'PASS',
-          resizableCard: 'PASS', consentControlsVisible: 'PASS' });
+          resizableCard: 'PASS', consentControlsVisible: 'PASS', nativeFramePalette: 'PASS', outputLimitWarning: 'PASS' });
         card.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
         await waitUntil(() => card.isDestroyed(), 'escapeDidNotClose');
         overlay.destroy();
@@ -363,7 +395,7 @@ function runElectron() {
     } catch (error) {
       // Exception messages from OS capture APIs can contain screen titles; print only our fixed diagnostic codes.
       const code = /^[a-zA-Z][a-zA-Z0-9]{0,60}$/.test(error.message) ? error.message : 'unexpectedSmokeFailure';
-      console.error(JSON.stringify({ status: 'FAIL', code, rendererErrors: failures }));
+      console.error(JSON.stringify({ status: 'FAIL', code, rendererErrors: failures, clipboardDiagnostic }));
     } finally {
       restoreCursor();
       closeExplainWindow();

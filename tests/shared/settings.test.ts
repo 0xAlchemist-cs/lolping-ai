@@ -581,6 +581,13 @@ describe('feature settings', () => {
   });
 
   it('defaults the AI endpoint empty and bounds what a file may carry into it', () => {
+    expect(normalizeSettings({}).aiMaxTokens).toBe(8192);
+    for (const value of [1024, 2048, 4096, 8192, 16384]) {
+      expect(normalizeSettings({ aiMaxTokens: value }).aiMaxTokens).toBe(value);
+    }
+    for (const value of [0, -1, 5000, 1e9, NaN, '8192', null]) {
+      expect(normalizeSettings({ aiMaxTokens: value }).aiMaxTokens).toBe(8192);
+    }
     expect(DEFAULT_SETTINGS.aiBaseUrl).toBe('');
     expect(DEFAULT_SETTINGS.aiModel).toBe('');
     expect(normalizeSettings({ aiBaseUrl: '  https://api.example.com/v1/ ', aiModel: ' gpt-4o-mini ' }).aiBaseUrl)

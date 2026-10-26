@@ -1,8 +1,9 @@
 import { MAX_QUESTION } from '../../shared/explain';
 import type { AiErrorCode } from '../../shared/aiConfig';
-import type { ExplainEvent, ExplainText } from '../../shared/ipc';
+import type { ExplainEvent, ExplainText, ExplainUiDiagnostic } from '../../shared/ipc';
 import type { VisionAsk } from '../../shared/vision';
 import { VisionPreview } from './visionPreview';
+import { submitOnEnter } from './submitKey';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const title = $('title');
@@ -38,6 +39,8 @@ const vision = new VisionPreview(window.explainApi, {
 }, (request) => { void askRequest(request.question, request); });
 const stopVisionSession = window.explainApi.onVisionSession(setSession);
 window.addEventListener('beforeunload', () => {
+  closed = true;
+  closeAfterCopy = false;
   invalidate();
   stopVisionSession();
   vision.destroy();
@@ -45,18 +48,33 @@ window.addEventListener('beforeunload', () => {
 
 let words: ExplainText | null = null;
 let lastId: number | null = null;
+let diagnosticsEnabled = false;
+let diagnosticId: number | null = null;
 let latestAnswer = '';
 let lastQuestion = '';
 let lastMode: 'text' | 'vision' = 'text';
 let sessionId = 0;
 let epoch = 0;
 let awaitingId = false;
+let copying = false;
+let closed = false;
+let closeAfterCopy = false;
+let questionComposing = false;
+let blockImplicitSubmit = false;
 type Terminal = Extract<ExplainEvent, { kind: 'done' | 'error' }>;
 const early = new Map<number, { text: string; terminal: Terminal | null }>();
 
 /** The states the card can be in; every transition goes through setState so the buttons stay consistent. */
 type State = 'idle' | 'unconfigured' | 'generating' | 'done' | 'error';
 let state: State = 'idle';
+
+function reportUi(phase: ExplainUiDiagnostic['phase']): void {
+  if (!diagnosticsEnabled || diagnosticId === null) return;
+  try {
+    window.explainApi.reportDiagnostic?.({ id: diagnosticId, phase, state: closed ? 'closed' : state,
+      characters: latestAnswer.length, sendDisabled: send.disabled, stopVisible: !stopBtn.hidden });
+  } catch { /* Diagnostic failures must not change interaction or completion. */ }
+}
 
 /** A code point is one letter, one Chinese character or one emoji, however many UTF-16 units it takes. */
 function clamp(): void {
@@ -77,7 +95,12 @@ function setState(next: State): void {
   setup.hidden = next !== 'unconfigured';
   failure.hidden = next !== 'error';
   emptyState.hidden = next !== 'idle' || latestAnswer.length > 0;
+  updateCopy();
   updateModeLabel();
+}
+
+function updateCopy(): void {
+  copy.disabled = closed || copying || latestAnswer.length === 0 || state === 'generating';
 }
 
 function updateModeLabel(): void {
@@ -92,7 +115,7 @@ function errorText(code: AiErrorCode): string {
 }
 
 async function ask(): Promise<void> {
-  if (!words || state === 'generating') return;
+  if (closed || !words || state === 'generating') return;
   const q = question.value.trim();
   if (!q) {
     showHint(words.empty, true);
@@ -113,6 +136,7 @@ function setSession(next: number): void {
   sessionId = next;
   vision.setSession(next);
   if (lastMode === 'vision') {
+    diagnosticId = null;
     invalidate();
     lastMode = 'text';
     latestAnswer = '';
@@ -128,16 +152,21 @@ function fail(code: AiErrorCode): void {
   lastId = null;
   awaitingId = false;
   early.clear();
+  if (code === 'outputLimit' && latestAnswer.length > 0) {
+    showHint(errorText(code), true);
+    setState('done');
+    return;
+  }
   showHint('', false);
   failureTitle.textContent = words?.errorTitle ?? '';
   failureText.textContent = errorText(code);
-  copy.disabled = latestAnswer.length === 0;
   setState('error');
 }
 
 async function askRequest(q: string, screenshot?: VisionAsk): Promise<void> {
-  if (!words || state === 'generating') return;
+  if (closed || !words || state === 'generating') return;
   invalidate();
+  diagnosticId = null;
   const requestEpoch = epoch;
   lastQuestion = q;
   lastMode = screenshot ? 'vision' : 'text';
@@ -158,6 +187,8 @@ async function askRequest(q: string, screenshot?: VisionAsk): Promise<void> {
     if (typeof reply !== 'number' && !reply.ok) { fail(reply.code); return; }
     const id = typeof reply === 'number' ? reply : reply.id;
     lastId = id;
+    diagnosticId = id;
+    reportUi('started');
     const buffered = early.get(id);
     early.clear();
     if (buffered?.text) receive({ kind: 'delta', id, text: buffered.text });
@@ -169,17 +200,44 @@ async function askRequest(q: string, screenshot?: VisionAsk): Promise<void> {
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
-  if (state !== 'generating') void ask();
+  if (!questionComposing && !blockImplicitSubmit && state !== 'generating') void ask();
 });
 question.addEventListener('input', clamp);
+question.addEventListener('compositionstart', () => { questionComposing = true; blockImplicitSubmit = true; });
+question.addEventListener('compositionend', () => { questionComposing = false; });
+question.addEventListener('keydown', event => {
+  // IME Enter may still trigger the form's default submit after keydown was correctly ignored.
+  blockImplicitSubmit = questionComposing || event.isComposing || event.keyCode === 229 || event.repeat
+    || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey;
+  if (!questionComposing) submitOnEnter(event, () => { void ask(); });
+});
+send.addEventListener('click', event => {
+  // A candidate's implicit click has detail=0 and leaves focus in the question field.
+  if (event.detail > 0 || document.activeElement === send) blockImplicitSubmit = false;
+});
 stopBtn.addEventListener('click', () => {
   window.explainApi.stop();
   invalidate();
   showHint('', false);
   setState(latestAnswer.length > 0 ? 'done' : 'idle');
-  copy.disabled = latestAnswer.length === 0;
+  reportUi('stop');
 });
-function close(): void { invalidate(); vision.destroy(); window.explainApi.close(); }
+function close(): void {
+  if (closed) {
+    // A second close is an explicit escape hatch if the platform clipboard operation never settles.
+    if (closeAfterCopy) { closeAfterCopy = false; window.explainApi.close(); }
+    return;
+  }
+  closed = true;
+  invalidate();
+  vision.destroy();
+  send.disabled = true;
+  reportUi('close');
+  if (copying) {
+    closeAfterCopy = true;
+    window.explainApi.stop();
+  } else window.explainApi.close();
+}
 closeBtn.addEventListener('click', close);
 openSettingsBtn.addEventListener('click', () => window.explainApi.openSettings());
 retry.addEventListener('click', () => {
@@ -194,21 +252,34 @@ retry.addEventListener('click', () => {
   question.value = lastQuestion;
   void ask();
 });
-copy.addEventListener('click', () => {
-  if (!latestAnswer || !words) return;
+async function copyAnswer(): Promise<void> {
+  if (closed || copying || !latestAnswer || !words || state === 'generating') return;
   const w = words;
-  void navigator.clipboard.writeText(latestAnswer).then(
-    () => {
+  const text = latestAnswer;
+  const copyEpoch = epoch;
+  const current = (): boolean => !closed && epoch === copyEpoch && latestAnswer === text;
+  copying = true;
+  copied.textContent = '';
+  copied.classList.remove('warn');
+  updateCopy();
+  try {
+    await navigator.clipboard.writeText(text);
+    if (current()) {
       copied.textContent = w.copied;
       copied.classList.remove('warn');
-    },
-    () => {
-      // P1A swallowed this failure; now the user knows why nothing landed in the clipboard.
+    }
+  } catch {
+    if (current()) {
       copied.textContent = w.copyFailed;
       copied.classList.add('warn');
-    },
-  );
-});
+    }
+  } finally {
+    copying = false;
+    if (closeAfterCopy) { closeAfterCopy = false; window.explainApi.close(); }
+    else if (!closed) updateCopy();
+  }
+}
+copy.addEventListener('click', () => { void copyAnswer(); });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
@@ -241,13 +312,13 @@ function receive(ev: ExplainEvent): void {
     showHint('', false);
     if (latestAnswer.length > 0) {
       setState('done');
-      copy.disabled = false;
     } else {
       fail('badResponse');
     }
   } else {
     fail(ev.code);
   }
+  if (ev.kind !== 'delta') reportUi('terminal');
 }
 window.explainApi.on(receive);
 
@@ -274,9 +345,11 @@ void window.explainApi.strings().then((t) => {
 });
 void window.explainApi.state().then((s) => {
   if (!s) return;
+  diagnosticsEnabled = s.diagnosticsEnabled === true;
   if (!s.configured) setState('unconfigured');
   vision.setConfigured(s.configured);
   setSession(s.visionSessionId);
   vision.setAvailable(s.captureAvailable);
+  if (diagnosticId !== null) reportUi(state === 'generating' ? 'started' : 'terminal');
 });
 requestAnimationFrame(() => question.focus());

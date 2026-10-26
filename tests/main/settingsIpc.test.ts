@@ -56,6 +56,11 @@ function registerWith(update?: SettingsIpcDeps['update']): void {
 }
 
 describe('settings IPC', () => {
+  it('opens the current fork when the settings GitHub button is clicked', async () => {
+    await call(SETTINGS_CH.openProject);
+    expect(h.opened).toEqual(['https://github.com/0xAlchemist-cs/lolping-ai']);
+  });
+
   it('refuses to make the text and enable shortcuts identical', async () => {
     const result = await call(SETTINGS_CH.set, { textHotkey: store.get().toggleHotkey });
     expect(result).toMatchObject({ ok: false, error: strings('en').shortcutClash });

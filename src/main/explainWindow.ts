@@ -7,6 +7,9 @@ import { MAX_VISION_DATA_URL_CHARS, type VisionReply, type VisionResult, type Vi
 import type { VisionImage } from '../shared/vision';
 import type { AiErrorCode } from '../shared/aiConfig';
 import { VisionSnapshotError, VisionSnapshots } from './visionSnapshot';
+import { useDarkWindowFrame } from './windowsFrame';
+import { parseUiDiagnostic } from './aiDiagnostics';
+import type { CancelSource } from './aiClient';
 
 export interface VisionUpload {
   images: readonly VisionImage[];
@@ -27,7 +30,8 @@ export interface ExplainDeps {
   /** Starts one streamed answer; every event it produces goes through `sink`. Must never throw. */
   ask: (question: string, id: number, sink: (ev: ExplainEvent) => void, upload?: VisionUpload) => void;
   /** Stops whatever `ask` started. Called on stop, close, and when a new ask replaces an old one. */
-  cancel: () => void;
+  cancel: (source?: CancelSource) => void;
+  diagnostics?: { enabled: boolean; renderer: (report: unknown) => void };
   /** True when endpoint, model and key are all in place. */
   configured: () => boolean;
   /** Opens the settings window at the AI section. */
@@ -39,9 +43,12 @@ export interface ExplainDeps {
 }
 
 let win: BrowserWindow | null = null;
+let revealWindow: (() => void) | null = null;
 let words: ExplainText | null = null;
 let deps: ExplainDeps | null = null;
 let currentId = 0;
+let diagnosticId: number | null = null;
+const diagnosticPhases = new Set<string>();
 let generating = false;
 let hasAnswer = false;
 let visionSessionId = 0;
@@ -73,11 +80,13 @@ export function registerExplainWindow(d: ExplainDeps): void {
     const q = parseQuestion(raw);
     if (!q) return null;
     currentId += 1;
-    deps.cancel(); // Invalidate first: cancellation can synchronously emit a final event.
+    deps.cancel('replaced'); // Invalidate first: cancellation can synchronously emit a final event.
     visionGenerating = false;
     generating = true;
     hasAnswer = false;
     const id = currentId;
+    diagnosticId = id;
+    diagnosticPhases.clear();
     deps.ask(q, id, (ev) => sink(ev));
     return id;
   });
@@ -108,11 +117,13 @@ export function registerExplainWindow(d: ExplainDeps): void {
       const { images, expiresAt } = snapshots.consume(visionSessionId, input.snapshotId as number, input.scope, recipient);
       previewOpen = false;
       currentId += 1;
-      deps.cancel();
+      deps.cancel('replaced');
       generating = true;
       visionGenerating = true;
       hasAnswer = false;
       const id = currentId;
+      diagnosticId = id;
+      diagnosticPhases.clear();
       const owner = win;
       const session = visionSessionId;
       const revision = visionRevision;
@@ -129,10 +140,22 @@ export function registerExplainWindow(d: ExplainDeps): void {
     currentId += 1; // everything still in flight is stale now
     generating = false;
     visionGenerating = false;
-    deps?.cancel();
+    deps?.cancel('user');
+  });
+  ipcMain.on(EXPLAIN_CH.diagnostic, (event, raw: unknown) => {
+    if (!win || !ownsMainFrame(event, win) || !deps?.diagnostics?.enabled) return;
+    const report = parseUiDiagnostic(raw);
+    if (!report || report.id !== diagnosticId || diagnosticPhases.has(report.phase)) return;
+    diagnosticPhases.add(report.phase); // At most four metadata acknowledgements per accepted request.
+    deps.diagnostics.renderer(report);
   });
   ipcMain.on(EXPLAIN_CH.close, (event) => {
-    if (win && ownsMainFrame(event, win)) win.close();
+    if (!win || !ownsMainFrame(event, win)) return;
+    currentId += 1; // Native destruction can lag behind Close; stop uploads and late events immediately.
+    generating = false;
+    visionGenerating = false;
+    deps?.cancel('window');
+    win.close();
   });
   ipcMain.on(EXPLAIN_CH.openSettings, (event) => {
     if (win && ownsMainFrame(event, win)) deps?.openSettings();
@@ -140,7 +163,8 @@ export function registerExplainWindow(d: ExplainDeps): void {
   ipcMain.handle(EXPLAIN_CH.strings, (event): ExplainText | null => (win && ownsMainFrame(event, win) ? words : null));
   ipcMain.handle(EXPLAIN_CH.state, (event): ExplainState | null => {
     if (!win || !ownsMainFrame(event, win)) return null;
-    return { configured: deps?.configured() ?? false, visionSessionId, captureAvailable: !!visionTarget && !!deps?.capture };
+    return { configured: deps?.configured() ?? false, visionSessionId, captureAvailable: !!visionTarget && !!deps?.capture,
+      ...(deps?.diagnostics?.enabled ? { diagnosticsEnabled: true } : {}) };
   });
   ipcMain.handle(EXPLAIN_CH.capture, async (event, raw: unknown): Promise<VisionReply | null> => {
     const owner = win;
@@ -183,10 +207,7 @@ export function registerExplainWindow(d: ExplainDeps): void {
     } finally {
       captureInProgress = false;
       // A replacement card may have reached ready-to-show while the capture scope kept it hidden.
-      if (win && win !== owner && !win.isDestroyed()) {
-        win.show();
-        win.focus();
-      }
+      if (win && win !== owner && !win.isDestroyed()) revealWindow?.();
     }
   });
   ipcMain.on(EXPLAIN_CH.closePreview, (event, raw: unknown) => {
@@ -211,8 +232,9 @@ function ownsMainFrame(event: Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>
 
 /** Only the newest stream may draw, and only while the window exists — late events from a replaced or dead request die here. */
 function sink(ev: ExplainEvent): void {
-  if (ev.id !== currentId || !win || win.isDestroyed()) return;
+  if (ev.id !== currentId || !generating || !win || win.isDestroyed()) return;
   win.webContents.send(EXPLAIN_CH.event, ev);
+  if (ev.kind === 'delta' && ev.text.length > 0) hasAnswer = true;
   if (ev.kind === 'done') {
     generating = false;
     visionGenerating = false;
@@ -233,6 +255,7 @@ export function openExplainWindow(point: { x: number; y: number }, text: Explain
     generating = false;
     visionGenerating = false;
     deps?.cancel();
+    diagnosticId = null;
   }
   visionTarget = target ? { ...target, bounds: { ...target.bounds } } : null;
   previewOpen = false;
@@ -240,13 +263,14 @@ export function openExplainWindow(point: { x: number; y: number }, text: Explain
     // A second gesture while the card is up shows the card it already has; spawning another would steal focus twice.
     win.webContents.mainFrame.send(EXPLAIN_CH.visionSession, visionSessionId);
     if (!captureInProgress) {
-      win.show();
-      win.focus();
+      revealWindow?.();
     }
     return;
   }
   words = text;
   currentId += 1; // anything from a previous card's lifetime is stale
+  diagnosticId = null;
+  diagnosticPhases.clear();
   generating = false;
   hasAnswer = false;
   const area = screen.getDisplayNearestPoint(point).workArea;
@@ -260,7 +284,9 @@ export function openExplainWindow(point: { x: number; y: number }, text: Explain
     minWidth: Math.min(400, area.width),
     minHeight: Math.min(360, area.height),
     frame: false,
-    backgroundColor: '#12141c',
+    backgroundColor: '#010a13',
+    // Idle border color is separate from the native resize gutter's dark-mode opt-in.
+    ...(process.platform === 'win32' ? { accentColor: '#53452d' } : {}),
     resizable: true,
     minimizable: false,
     maximizable: true,
@@ -284,8 +310,27 @@ export function openExplainWindow(point: { x: number; y: number }, text: Explain
 }
 
 function setup(w: BrowserWindow): void {
+  let pageReady = false;
+  let frameReady = false;
+  let focusTimer: ReturnType<typeof setTimeout> | undefined;
+  let focused = false;
+  const reveal = (): void => {
+    if (!pageReady || !frameReady || captureInProgress || w.isDestroyed() || win !== w) return;
+    w.show();
+    w.focus();
+    focusTimer ??= setTimeout(() => {
+      if (!w.isDestroyed() && !focused && !captureInProgress && !previewOpen) w.close();
+    }, FOCUS_WAIT_MS);
+  };
+  revealWindow = reveal;
+  // Unsupported/blocked native styling falls back to a usable card; no global theme or input settings change.
+  void useDarkWindowFrame(w).then(() => { frameReady = true; reveal(); });
   w.on('closed', () => {
-    if (win === w) win = null;
+    if (win === w) {
+      win = null;
+      revealWindow = null;
+    }
+    clearTimeout(focusTimer);
     currentId += 1;
     generating = false;
     hasAnswer = false;
@@ -294,11 +339,12 @@ function setup(w: BrowserWindow): void {
     previewOpen = false;
     snapshots.clear();
     visionGenerating = false;
-    deps?.cancel();
+    diagnosticId = null;
+    diagnosticPhases.clear();
+    deps?.cancel('window');
     for (const cb of goneListeners) cb();
   });
   w.setAlwaysOnTop(true, 'screen-saver'); // above the overlay, like the text box
-  let focused = false;
   w.on('focus', () => {
     focused = true;
   });
@@ -307,13 +353,9 @@ function setup(w: BrowserWindow): void {
   w.on('blur', () => {
     if (focused && !generating && !hasAnswer && !captureInProgress && !previewOpen) w.close();
   });
-  const focusTimer = setTimeout(() => {
-    if (!w.isDestroyed() && !focused && !captureInProgress && !previewOpen) w.close();
-  }, FOCUS_WAIT_MS);
-  w.once('closed', () => clearTimeout(focusTimer));
   w.once('ready-to-show', () => {
-    w.show();
-    w.focus();
+    pageReady = true;
+    reveal();
   });
   const closeIfAlive = (): void => {
     if (!w.isDestroyed()) w.close();

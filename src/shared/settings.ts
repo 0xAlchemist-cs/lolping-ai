@@ -1,4 +1,5 @@
 import { DEFAULT_CLICK_EMOTE, DEFAULT_EMOTE_WHEEL } from './emoteCatalog';
+import { DEFAULT_AI_MAX_TOKENS, normalizeAiMaxTokens } from './aiConfig';
 import {
   CUSTOM_NAME_MAX, MAX_CUSTOM_EMOTES, customHash, isCustomRef, isEmoteFx, normalizeClickEmote, normalizeEmoteWheel,
   type CustomEmote, type EmoteRef,
@@ -93,6 +94,8 @@ export interface Settings {
   aiBaseUrl: string;
   /** The model name the user chose. Empty until configured. */
   aiModel: string;
+  /** Per-answer output budget. The connection probe has its own one-token cap. */
+  aiMaxTokens: number;
 }
 
 /** Per-machine defaults for the room profile: the OS username and a random tag colour. */
@@ -144,6 +147,7 @@ export const DEFAULT_SETTINGS: Settings = {
   roomTextStyle: 'spot',
   aiBaseUrl: '',
   aiModel: '',
+  aiMaxTokens: DEFAULT_AI_MAX_TOKENS,
 };
 
 export const LIMITS = {
@@ -349,6 +353,7 @@ export function normalizeSettings(raw: unknown, platform: Platform = 'win', iden
     // Endpoint shape and model charset are checked where they are used (aiConfig); here we only bound them.
     aiBaseUrl: typeof r.aiBaseUrl === 'string' ? r.aiBaseUrl.trim().slice(0, 200) : '',
     aiModel: typeof r.aiModel === 'string' ? r.aiModel.trim().slice(0, 100) : '',
+    aiMaxTokens: normalizeAiMaxTokens(r.aiMaxTokens),
   };
 }
 

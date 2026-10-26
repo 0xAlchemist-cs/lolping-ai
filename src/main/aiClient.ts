@@ -24,6 +24,32 @@ export type AiFetch = (url: string, init: {
   redirect: 'error';
 }) => Promise<FetchResponse>;
 
+/** Bounded metadata for an injected local observer; no question, response text, URL, key or server message. */
+export interface StreamDiagnostic {
+  mode: 'text' | 'vision' | 'probe';
+  stage: 'prepare' | 'validation' | 'http' | 'sse';
+  httpStatus: number | null;
+  sseEvents: number;
+  deltaCount: number;
+  characters: number;
+  finishReason: 'stop' | 'length' | 'other' | null;
+  doneSeen: boolean;
+  /** Explicit cancellation or watchdog expiry, excluding routine stream cleanup. */
+  aborted: boolean;
+  errorCode: AiErrorCode | null;
+  outputLimited: boolean;
+  elapsedMs: number;
+  timeoutKind: 'idle' | 'total' | null;
+  cancelSource: CancelSource | null;
+}
+
+export type CancelSource = 'user' | 'window' | 'replaced' | 'other';
+/** Never copy an arbitrary AbortSignal reason into a diagnostic. */
+export function cancelSource(signal: AbortSignal): CancelSource | null {
+  if (!signal.aborted) return null;
+  return ['user', 'window', 'replaced'].includes(signal.reason) ? signal.reason as CancelSource : 'other';
+}
+
 export interface StreamDeps {
   fetchImpl: AiFetch;
   /** Injectable clock for the watchdogs. */
@@ -36,6 +62,8 @@ export interface StreamDeps {
   maxChars?: number;
   /** Cap sent to the service as max_tokens. */
   maxTokens?: number;
+  /** Opt-in local observer, invoked once at termination; observer failures cannot change completion. */
+  onDiagnostic?: (diagnostic: Readonly<StreamDiagnostic>) => void;
 }
 
 const DEFAULTS = { idleTimeoutMs: 30_000, totalTimeoutMs: 180_000, maxChars: 20_000, maxTokens: 1024 };
@@ -176,6 +204,27 @@ function chatContent(question: string, images?: readonly VisionImage[]): string 
 }
 
 async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
+  const started = args.now();
+  const trace: StreamDiagnostic = { mode: allowEmpty ? 'probe' : args.images?.length ? 'vision' : 'text',
+    stage: 'validation', httpStatus: null, sseEvents: 0, deltaCount: 0, characters: 0, finishReason: null, doneSeen: false,
+    aborted: false, errorCode: null, outputLimited: false, elapsedMs: 0, timeoutKind: null, cancelSource: null };
+  try {
+    await consumeStream(args, allowEmpty, trace);
+  } catch (error) {
+    trace.errorCode = error instanceof AiError ? error.code : 'network';
+    trace.aborted = args.signal.aborted || trace.errorCode === 'aborted' || trace.errorCode === 'timeout';
+    throw error;
+  } finally {
+    // Observers cannot alter completion or delay cleanup.
+    try {
+      const elapsed = args.now() - started;
+      trace.cancelSource = cancelSource(args.signal);
+      args.onDiagnostic?.(Object.freeze({ ...trace, elapsedMs: Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0 }));
+    } catch { /* Diagnostic failures must not affect the request. */ }
+  }
+}
+
+async function consumeStream(args: StreamArgs, allowEmpty: boolean, trace: StreamDiagnostic): Promise<void> {
   if (args.signal.aborted) throw new AiError('aborted');
   if (args.images?.length) {
     try {
@@ -187,6 +236,7 @@ async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
   const { idleTimeoutMs, totalTimeoutMs, maxChars, maxTokens } = { ...DEFAULTS, ...args };
   const url = `${args.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   let received = 0;
+  let outputLimited = false;
   let watchCode: AiErrorCode | null = null;
 
   // The watchdogs abort a controller of their own; the caller's signal is the user's stop button.
@@ -200,6 +250,7 @@ async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
   };
   const wait = <T>(pending: PromiseLike<T>): Promise<T> => Promise.race([pending, aborted]);
   const fireIdle = (): void => {
+    if (!watchCode) trace.timeoutKind = 'idle';
     abort('timeout');
   };
   const idleMs = idleTimeoutMs;
@@ -209,6 +260,7 @@ async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
     idleTimer = setTimeout(fireIdle, idleMs);
   };
   const totalTimer: ReturnType<typeof setTimeout> = setTimeout(() => {
+    if (!watchCode) trace.timeoutKind = 'total';
     abort('timeout');
   }, totalTimeoutMs);
   const onAbort = (): void => {
@@ -220,6 +272,7 @@ async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
   let iterator: AsyncIterator<Uint8Array> | null = null;
   try {
     const content = chatContent(args.question, args.images);
+    trace.stage = 'http';
     const res = await wait(args.fetchImpl(url, {
       method: 'POST',
       headers: {
@@ -236,6 +289,7 @@ async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
       signal: controller.signal,
       redirect: 'error',
     }));
+    if (Number.isInteger(res.status) && res.status >= 100 && res.status <= 599) trace.httpStatus = res.status;
     iterator = bodyIterator(res.body);
     if (!res.ok) {
       let code = statusToCode(res.status);
@@ -260,6 +314,7 @@ async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
       throw new AiError(code);
     }
     if (!iterator) throw new AiError('badResponse');
+    trace.stage = 'sse';
     const decoder = new TextDecoder('utf-8');
     const parser = new SseParser();
     while (true) {
@@ -271,7 +326,11 @@ async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
       armIdle();
       for (const data of parser.push(decoder.decode(chunk, { stream: true }))) {
         if (watchCode) throw new AiError(watchCode);
+        trace.sseEvents += 1;
         if (data === '[DONE]') {
+          trace.doneSeen = true;
+          if (!allowEmpty && outputLimited) throw new AiError('outputLimit');
+          if (trace.finishReason === 'other') throw new AiError('badResponse');
           if (received === 0 && !allowEmpty) throw new AiError('badResponse');
           return;
         }
@@ -279,16 +338,24 @@ async function runStream(args: StreamArgs, allowEmpty: boolean): Promise<void> {
         try {
           payload = JSON.parse(data);
         } catch {
-          continue; // one malformed frame in a long stream is survivable
+          throw new AiError('badResponse'); // Skipping a damaged content frame would silently shorten a successful answer.
         }
         const error = providerError(payload);
         if (error) throw new AiError(error);
+        const choices = record(payload)?.choices;
+        const finish = Array.isArray(choices) ? record(choices[0])?.finish_reason : null;
+        if (typeof finish === 'string' && trace.finishReason !== 'other') {
+          trace.finishReason = finish === 'stop' || finish === 'length' ? finish : 'other';
+        }
+        if (finish === 'length') { outputLimited = true; trace.outputLimited = true; }
         const text = deltaOf(payload);
         if (text.length > 0) {
           received += text.length;
           if (received > maxChars) {
             throw new AiError('tooLong');
           }
+          trace.deltaCount += 1;
+          trace.characters = received;
           args.onDelta(text);
         }
       }

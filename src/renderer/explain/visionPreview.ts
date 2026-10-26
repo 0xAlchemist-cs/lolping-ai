@@ -1,6 +1,7 @@
 import type { ExplainApi } from '../../shared/ipc';
 import type { VisionAsk, VisionErrorCode, VisionImage, VisionSendState, VisionSnapshotInfo, VisionText } from '../../shared/vision';
 import { MAX_QUESTION } from '../../shared/explain';
+import { submitOnEnter } from './submitKey';
 
 export interface VisionElements {
   open: HTMLButtonElement;
@@ -37,6 +38,7 @@ export class VisionPreview {
   private disposed = false;
   private configured = false;
   private busy = false;
+  private questionComposing = false;
   private captureError: VisionErrorCode | null = null;
   private localFailed = false;
   private fullFailed = false;
@@ -49,6 +51,11 @@ export class VisionPreview {
     this.updateButtons();
   };
   private readonly sendListener = (): void => this.submit();
+  private readonly questionKeyListener = (event: KeyboardEvent): void => {
+    if (!this.questionComposing) submitOnEnter(event, () => this.submit());
+  };
+  private readonly compositionStartListener = (): void => { this.questionComposing = true; };
+  private readonly compositionEndListener = (): void => { this.questionComposing = false; };
   private readonly openListener = (): void => { void this.open(); };
   private readonly closeListener = (): void => this.close();
 
@@ -65,6 +72,9 @@ export class VisionPreview {
     elements.local.addEventListener('error', this.loadListener);
     elements.full.addEventListener('error', this.loadListener);
     elements.send?.addEventListener('click', this.sendListener);
+    elements.question?.addEventListener('keydown', this.questionKeyListener);
+    elements.question?.addEventListener('compositionstart', this.compositionStartListener);
+    elements.question?.addEventListener('compositionend', this.compositionEndListener);
     this.reset();
   }
 
@@ -167,6 +177,9 @@ export class VisionPreview {
     this.elements.close.removeEventListener('click', this.closeListener);
     this.elements.includeFull?.removeEventListener('change', this.selectionListener);
     this.elements.send?.removeEventListener('click', this.sendListener);
+    this.elements.question?.removeEventListener('keydown', this.questionKeyListener);
+    this.elements.question?.removeEventListener('compositionstart', this.compositionStartListener);
+    this.elements.question?.removeEventListener('compositionend', this.compositionEndListener);
     for (const image of [this.elements.local, this.elements.full]) {
       image.removeEventListener('load', this.loadListener);
       image.removeEventListener('error', this.loadListener);
@@ -213,6 +226,7 @@ export class VisionPreview {
   }
 
   private reset(): void {
+    this.questionComposing = false;
     this.requestId += 1;
     this.opened = false;
     this.loading = false;

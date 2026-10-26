@@ -1,7 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EXPLAIN_CH, type ExplainApi, type ExplainEvent, type ExplainText } from '../../src/shared/ipc';
-import { AiRequests, type PreparedAi } from '../../src/main/aiRequest';
+import { AiRequests, createExplainAsk, type PreparedAi } from '../../src/main/aiRequest';
+import { createAiDiagnostics } from '../../src/main/aiDiagnostics';
 import type { AiFetch } from '../../src/main/aiClient';
 import { strings } from '../../src/shared/i18n';
 import { MAX_VISION_DATA_URL_CHARS, type VisionPreview, type VisionResult, type VisionTarget } from '../../src/shared/vision';
@@ -9,6 +10,8 @@ import { MAX_VISION_DATA_URL_CHARS, type VisionPreview, type VisionResult, type 
 const { windows } = vi.hoisted(() => ({ windows: [] as unknown[] }));
 const { handles } = vi.hoisted(() => ({ handles: new Map<string, (event: unknown, raw: unknown) => unknown>() }));
 const { sends } = vi.hoisted(() => ({ sends: new Map<string, (event: unknown, raw: unknown) => void>() }));
+const { darkFrame } = vi.hoisted(() => ({ darkFrame: vi.fn<() => Promise<boolean>>() }));
+vi.mock('../../src/main/windowsFrame', () => ({ useDarkWindowFrame: darkFrame }));
 
 vi.mock('electron', async () => {
   const { EventEmitter: Emitter } = await import('node:events');
@@ -108,6 +111,7 @@ beforeEach(async () => {
   displayPresent = true;
   currentWorkArea = { x: 0, y: 0, width: 1920, height: 1040 };
   deps.capture.mockReset();
+  darkFrame.mockReset().mockResolvedValue(true);
   deps.capture.mockResolvedValue({ ok: true, preview: PREVIEW });
   vi.resetModules();
   mod = await import('../../src/main/explainWindow');
@@ -145,7 +149,8 @@ function deferredFlow<T>() {
 }
 
 /** Actual renderer -> authorized main IPC -> snapshots -> preparation -> actual client, with only OS/network fakes. */
-async function flow(options: { pendingPreparation?: boolean; status?: number; holdStream?: boolean } = {}) {
+async function flow(options: { pendingPreparation?: boolean; status?: number; holdStream?: boolean;
+  streamEnd?: 'length' | 'stop' | 'malformed' | 'network' | 'eof'; diagnostics?: boolean } = {}) {
   const { TEST_JPEG_DATA_URL, TEST_JPEG_BASE64 } = await import('./fixtures/visionJpeg');
   const jpeg = Buffer.from(TEST_JPEG_BASE64, 'base64');
   const fullUrl = 'data:image/jpeg;base64,' + Buffer.concat([jpeg.subarray(0, 2),
@@ -172,6 +177,11 @@ async function flow(options: { pendingPreparation?: boolean; status?: number; ho
       if (options.status) { yield new TextEncoder().encode('{"error":{"message":"synthetic private echo"}}'); return; }
       yield new TextEncoder().encode('data: {"choices":[{"delta":{"content":"mock dual answer"}}]}\n\n');
       if (options.holdStream) await resume.promise;
+      if (options.streamEnd === 'network') throw new TypeError('synthetic disconnect');
+      if (options.streamEnd === 'eof') return;
+      if (options.streamEnd === 'malformed') yield new TextEncoder().encode('data: {broken}\n\n');
+      if (options.streamEnd === 'length') yield new TextEncoder().encode('data: {"choices":[{"finish_reason":"length"}]}\n\n');
+      if (options.streamEnd === 'stop') yield new TextEncoder().encode('data: {"choices":[{"finish_reason":"stop"}]}\n\n');
       yield new TextEncoder().encode('data: [DONE]\n\n');
     })() };
   });
@@ -182,14 +192,17 @@ async function flow(options: { pendingPreparation?: boolean; status?: number; ho
   const capture = vi.fn(async (): Promise<VisionResult> => {
     trace.push('capture.success'); return { ok: true, preview };
   });
-  mod.registerExplainWindow({ ...deps, capture, recipient: () => recipient, cancel: () => requests.cancel(),
+  const diagnosticLines: string[] = [];
+  const diagnostics = createAiDiagnostics(false, options.diagnostics ? '1' : undefined, line => diagnosticLines.push(line));
+  const ask = createExplainAsk(requests, diagnostics.enabled ? diagnostics.stream : undefined);
+  mod.registerExplainWindow({ ...deps, capture, recipient: () => recipient, diagnostics,
+    cancel: source => requests.cancel(source),
     ask: (question, id, sink, upload) => {
       trace.push('main.ask');
-      running = requests.run(question, 32, (text) => sink({ kind: 'delta', id, text }), upload).then((result) => {
-        trace.push(result.ok ? 'sse.done' : `failure.${result.code}`);
-        sink(result.ok ? { kind: 'done', id } : { kind: 'error', id, code: result.code });
-        return result;
-      });
+      running = ask(question, id, event => {
+        if (event.kind !== 'delta') trace.push(event.kind === 'done' ? 'sse.done' : `failure.${event.code}`);
+        sink(event);
+      }, upload);
     } });
   mod.openExplainWindow({ x: 10, y: 20 }, WORDS, TARGET);
   const win = windows[0] as FakeWindow;
@@ -204,6 +217,7 @@ async function flow(options: { pendingPreparation?: boolean; status?: number; ho
     Promise.resolve(handles.get(channel)?.(ownerEvent(win), raw)) as Promise<T>;
   const send = (channel: string, raw?: unknown): void => sends.get(channel)?.(ownerEvent(win), raw);
   const api: ExplainApi = {
+    reportDiagnostic: report => send(EXPLAIN_CH.diagnostic, report),
     strings: async () => WORDS, state: () => invoke(EXPLAIN_CH.state), capture: (id) => invoke(EXPLAIN_CH.capture, id),
     ask: (question) => invoke(EXPLAIN_CH.ask, question),
     askVision: (input) => { trace.push('renderer.askVision'); return invoke(EXPLAIN_CH.askVision, input); },
@@ -224,11 +238,68 @@ async function flow(options: { pendingPreparation?: boolean; status?: number; ho
     get('visionLocal').loaded(); get('visionFull').loaded();
   };
   const both = () => { get('visionIncludeFull').checked = true; get('visionIncludeFull').dispatchEvent(new Event('change')); };
-  return { get, win, trace, fetchImpl, capture, preparation, resume, ready, open, both,
+  return { get, win, trace, fetchImpl, capture, preparation, resume, ready, open, both, diagnosticLines,
     finish: () => running, change: () => { recipient = { ...recipient, model: 'changed' }; } };
 }
 
 describe('explainWindow dual-image integration', () => {
+  it('cancels at the authorized Close IPC even when native window destruction is delayed', async () => {
+    const t = await flow({ holdStream: true, diagnostics: true }); await t.open(); t.both();
+    t.get('visionSend').click();
+    await vi.waitFor(() => expect(t.get('body').textContent).toBe('mock dual answer'));
+    t.win.close = () => undefined; // Native closed may arrive after the server's next frame.
+    t.get('close').click(); t.resume.resolve();
+    expect(await t.finish()).toEqual({ ok: false, code: 'aborted' });
+    const records = t.diagnosticLines.map(line => JSON.parse(line));
+    expect(records.find(r => r.source === 'stream')).toMatchObject({ cancelSource: 'window', doneSeen: false });
+    expect(records.find(r => r.source === 'renderer' && r.phase === 'close')).toMatchObject({ state: 'closed' });
+  });
+  it.each(['stop', 'length', 'malformed', 'network', 'eof', undefined] as const)(
+    'observes real app ask wiring, SSE termination and applied UI on %s', async streamEnd => {
+      const t = await flow({ streamEnd, diagnostics: true }); await t.open(); t.both();
+      t.get('visionSend').click(); await t.finish();
+      const records = t.diagnosticLines.map(line => JSON.parse(line));
+      const stream = records.find(r => r.source === 'stream');
+      const ui = records.find(r => r.source === 'renderer' && r.phase === 'terminal');
+      expect(stream).toMatchObject({ mode: 'vision', stage: 'sse', httpStatus: 200,
+        characters: 16, doneSeen: !['malformed', 'network', 'eof'].includes(streamEnd ?? ''),
+        finishReason: streamEnd === 'stop' || streamEnd === 'length' ? streamEnd : null });
+      expect(ui).toMatchObject({ id: stream.id, state: !streamEnd || streamEnd === 'stop' || streamEnd === 'length'
+        ? 'done' : 'error', characters: 16, sendDisabled: false, stopVisible: false });
+      expect(records.filter(r => r.source === 'stream')).toHaveLength(1);
+      expect(t.diagnosticLines.join('')).not.toContain('mock dual answer');
+    });
+  it('does not log through the same entry when diagnostics are off', async () => {
+    const t = await flow(); await t.open(); t.both(); t.get('visionSend').click(); await t.finish();
+    expect(t.diagnosticLines).toEqual([]);
+  });
+  it('rejects foreign, stale, duplicate and secret-bearing renderer diagnostic payloads', async () => {
+    const t = await flow({ diagnostics: true }); await t.open(); t.both(); t.get('visionSend').click(); await t.finish();
+    const records = t.diagnosticLines.map(line => JSON.parse(line));
+    const ui = records.find(r => r.source === 'renderer' && r.phase === 'terminal');
+    const report = { id: ui.id, phase: 'close', state: 'closed', characters: 16, sendDisabled: true, stopVisible: false };
+    const handler = sends.get(EXPLAIN_CH.diagnostic);
+    const before = t.diagnosticLines.length;
+    handler?.({ sender: {}, senderFrame: {} }, report);
+    handler?.(ownerEvent(t.win), { ...report, id: report.id + 99 });
+    handler?.(ownerEvent(t.win), { ...report, text: 'synthetic secret' });
+    expect(t.diagnosticLines).toHaveLength(before);
+    handler?.(ownerEvent(t.win), report); handler?.(ownerEvent(t.win), report);
+    expect(t.diagnosticLines).toHaveLength(before + 1);
+  });
+  it.each([['length', 'outputLimit'], ['malformed', 'badResponse'], ['network', 'network'], ['eof', 'badResponse']] as const)(
+    'keeps the partial answer through renderer/main/client on %s without a false completion', async (streamEnd, code) => {
+      const t = await flow({ streamEnd }); await t.open(); t.both(); t.get('visionSend').click();
+      await vi.waitFor(() => expect(t.get('send').disabled).toBe(false));
+      expect(t.get('body').textContent).toBe('mock dual answer');
+      expect(t.get('copy').disabled).toBe(false);
+      expect(t.get('stop').hidden).toBe(true);
+      expect(t.get('hint').textContent).not.toBe(WORDS.generating);
+      expect(code === 'outputLimit' ? t.get('hint').textContent : t.get('failureText').textContent).toBe(WORDS.errors[code]);
+      expect(t.fetchImpl).toHaveBeenCalledOnce();
+      expect(t.trace).toContain(`failure.${code}`);
+      expect(t.trace).not.toContain('sse.done');
+    });
   it('sends exactly the two reviewed images once and exits generating after actual SSE done', async () => {
     const t = await flow(); await t.open(); t.both();
     expect(t.get('visionSelection').textContent).toBe(WORDS.vision.selectedBoth);
@@ -392,6 +463,17 @@ describe('explainWindow confirmed vision upload', () => {
     expect(handles.get(EXPLAIN_CH.state)?.(ownerEvent(win), undefined)).toBeNull();
   });
 
+  it.each(['outputLimit', 'stop'] as const)('keeps displayed partial text after %s when focus moves away', async (terminal) => {
+    const { send, win } = await prepare();
+    const reply = await send() as { ok: true; id: number };
+    asked[0].sink({ kind: 'delta', id: reply.id, text: 'Partial synthetic answer' });
+    if (terminal === 'outputLimit') asked[0].sink({ kind: 'error', id: reply.id, code: 'outputLimit' });
+    else sends.get(EXPLAIN_CH.stop)?.(ownerEvent(win), undefined);
+    win.emit('focus');
+    win.emit('blur');
+    expect(handles.get(EXPLAIN_CH.state)?.(ownerEvent(win), undefined)).not.toBeNull();
+  });
+
   it('rejects forged payloads, missing consent and foreign frames before starting a request', async () => {
     const { send, uploads, win } = await prepare();
     for (const input of [{ confirmed: false }, { images: ['file:///private'] }, { dataUrl: 'fake' },
@@ -440,6 +522,20 @@ function session(w: FakeWindow): number {
 }
 
 describe('explainWindow streaming protocol', () => {
+  it.each(['done', 'error'] as const)('forwards only one terminal event after %s and discards later deltas', async (kind) => {
+    mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
+    const w = windows[0] as FakeWindow;
+    const id = handles.get(EXPLAIN_CH.ask)?.(ownerEvent(w), 'synthetic terminal') as number;
+    const emit = asked[0].sink;
+    const terminal: ExplainEvent = kind === 'done' ? { kind, id } : { kind, id, code: 'network' };
+    emit({ kind: 'delta', id, text: 'partial' });
+    emit(terminal);
+    emit(terminal);
+    emit({ kind: 'delta', id, text: 'late corruption' });
+    emit({ kind: 'error', id, code: 'server' });
+    expect(w.webContents.sent.filter(([channel]) => channel === EXPLAIN_CH.event).map(([, event]) => event))
+      .toEqual([{ kind: 'delta', id, text: 'partial' }, terminal]);
+  });
   it('streams an ask: id out, deltas in, done ends it', async () => {
     mod.openExplainWindow({ x: 100, y: 100 }, WORDS);
     const contents = (windows[0] as FakeWindow).webContents;
@@ -514,6 +610,36 @@ describe('explainWindow streaming protocol', () => {
 });
 
 describe('explainWindow local capture lifecycle', () => {
+  it('waits for native frame preparation before showing without expiring the focus watchdog while hidden', async () => {
+    let finish: (ok: boolean) => void = () => undefined;
+    darkFrame.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    mod.openExplainWindow({ x: 10, y: 20 }, WORDS, TARGET);
+    const w = windows[0] as FakeWindow;
+    w.emit('ready-to-show');
+    vi.advanceTimersByTime(2600);
+    expect(w.shown).toBe(false);
+    expect(handles.get(EXPLAIN_CH.state)?.(ownerEvent(w), undefined)).not.toBeNull();
+    finish(true);
+    await Promise.resolve();
+    expect(w.shown).toBe(true);
+  });
+
+  it('ignores a late native frame result after closing and opens a replacement if styling is unavailable', async () => {
+    let finish: (ok: boolean) => void = () => undefined;
+    darkFrame.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    mod.openExplainWindow({ x: 10, y: 20 }, WORDS, TARGET);
+    const old = windows[0] as FakeWindow;
+    old.emit('ready-to-show');
+    old.close();
+    darkFrame.mockResolvedValueOnce(false);
+    mod.openExplainWindow({ x: 10, y: 20 }, WORDS, TARGET);
+    const replacement = windows[1] as FakeWindow;
+    replacement.emit('ready-to-show');
+    finish(true);
+    await Promise.resolve();
+    expect(old.shown).toBe(false);
+    expect(replacement.shown).toBe(true);
+  });
   it('uses the frozen wheel centre without a key, an ask, a fetch or a stream cancellation', async () => {
     configuredFlag = false;
     const fetch = vi.fn(() => { throw new Error('capture must stay local'); });
@@ -608,6 +734,8 @@ describe('explainWindow local capture lifecycle', () => {
     const next = windows[1] as FakeWindow;
     const focused = vi.fn();
     next.on('focus', focused);
+    next.emit('ready-to-show');
+    await Promise.resolve();
     finish({ ok: true, preview: PREVIEW });
     expect(await pending).toBeNull();
     expect(next.shown).toBe(true);
