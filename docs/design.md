@@ -631,3 +631,53 @@ References: [GLM-5.3-Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3
 [Chat Completions](https://docs.bigmodel.cn/api-reference/模型-api/对话补全),
 [streaming](https://docs.bigmodel.cn/cn/guide/capabilities/streaming),
 [provider errors](https://docs.bigmodel.cn/cn/api/api-code).
+
+## 17. Ping icon quick actions (P3, Windows)
+
+`features.quickActions` defaults to false. `quickActions` stores a version-1 map from non-`missing`
+Ping IDs to enabled/name/target bindings. Normalization drops malformed entries independently and always
+removes `missing`; the existing AI switch and report listener retain their behavior. Directions and wheel
+positions are not action keys. Moving an icon preserves its binding, including when temporarily absent.
+
+The Windows-only Fluent settings page selects icons without executing them. Local drafts become effective
+on Save. Test uses only the saved enabled binding and intentionally works with the feature switch off.
+The general settings patch strips protected bindings. Dedicated IPC authenticates the current settings
+window's main frame. A Main-owned file picker grants an expiring, frame-bound, one-use capability; the
+renderer cannot submit a program path. Editing the same binding can retain its existing program target.
+Save and execution recheck the regular local `.exe` and its canonical path, rejecting path redirection.
+
+Main creates a wheel session from the actual input bridge open event and stores origin, display, wheel
+size and icon configuration. At release it computes the expected icon with the same geometry as the
+renderer. The renderer emits the original Ping report first and a separate action confirmation next.
+Only the owning overlay's main frame can consume the matching two-second pending session once. Clicks,
+previews, remote Pings, center cancellation, `missing`, stale sessions and mismatches cannot execute.
+Configuration, display, helper and window lifecycle changes invalidate sessions. Pause, capture, room
+text, lock, suspend and shutdown gate dispatch. Settings changes and shutdown abort pending native jobs.
+No new input gesture, native hook state or input-helper protocol was added.
+
+`QuickActionExecutor` validates saved targets and refuses an in-flight duplicate instead of queuing.
+HTTPS addresses require a host, no credentials/control characters, and a bounded canonical length;
+`shell.openExternal` delegates to the default browser. Programs launch with an empty argument array and
+`shell: false`. An activation denial stops; only `launchRequired` permits a second filesystem check and
+launch. Process creation success means submission, not application readiness. No automatic elevation,
+scripts, shortcuts, arbitrary arguments, webpage fetching or remote icons are supported.
+
+`DesktopBridge` spawns the independent `desktop-helper.exe` only for a job, with bounded request/reply,
+strict status/exit parsing and a three-second timeout. Cancellation kills only its own child. Native
+activation compares full Unicode process paths, chooses the first eligible window in Z order, verifies
+HWND/PID/path again before restore and each foreground attempt, and reports actual foreground success.
+No eligible window returns `launchRequired`; selected but refused/disappeared windows return
+`activationDenied`. `IShellDispatch4::ToggleDesktop` uses Windows' desktop state; `desktopToggled` means
+the shell accepted the request. Input-helper faults and desktop-helper faults have separate lifecycles.
+
+Windows packaging ships the two production helpers and only the production main/preload/renderer
+directories. Fixtures, test executables and local smoke profiles stay outside the package. Other platforms
+keep their existing package and runtime paths; no new desktop helper is required there.
+
+Validation includes shared/Main Vitest tests, the original hook suite, native protocol/window fixtures,
+typecheck, production builds and independent sandbox preload checks. `tools/quick-actions-smoke.cjs`
+exercises the real Fluent UI with controlled IPC. `tools/ping-actions-smoke.cjs` runs production overlay
+and preload code with synthetic input-bridge events, an owned native window and an explicitly reported
+OS-injected Alt tap. It strictly observes two desktop toggles and preserves the legacy question-mark
+report. These tests make no physical-mouse, elevated-window or mixed-DPI acceptance claim. Native GUI
+checks expose skipped observations when the session cannot provide foreground or desktop state.

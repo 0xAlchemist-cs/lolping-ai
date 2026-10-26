@@ -166,9 +166,13 @@ that effect check as SKIPPED, separately from its passing request/response check
 not be described as completed desktop or hardware-gesture acceptance.
 
 Codex acceptance also reproduced the foreground-denied outcome in both Node and Electron
-hosts, with hidden and non-hidden desktop children. The Electron wheel/native smoke remains
-separate from the native protocol/window suite and has not passed its complete desktop
-round-trip assertion at this checkpoint.
+hosts, with hidden and non-hidden desktop children. The separate Electron wheel/native smoke
+subsequently passed its strict round-trip assertion after controlled OS-injected Alt input,
+using the production overlay/preload, synthetic bridge events and an owned native fixture.
+That result does not establish physical input-hook, UAC or mixed-DPI acceptance.
+The next strict smoke rerun failed: the first request returned `desktopToggled` but did
+not minimize the owned window. The independent native suite also observed no window
+effect without overlays. The cause remains unresolved; see `docs/p3-acceptance.md`.
 
 ## Not verified here (manual / Codex acceptance items)
 
@@ -195,10 +199,16 @@ round-trip assertion at this checkpoint.
   executable is indistinguishable from the original and would still be a valid activation
   target for that approved path.
 
-## Commit status: blocked by the environment's commit gate (recorded 2026-10-26)
+## Integration status (2026-10-26)
 
-All work is complete and verified in this worktree, but `git commit` is blocked by the
-Mimosa L3 pre-commit gate in this environment: it scans the whole project on every commit
+Codex reviewed and committed this module as `b81e645` in the external worktree and integrated
+it as `63ea52b`. Normal Git commits succeeded in Codex's environment; no gate configuration
+or bypass was used. Packaging and CI followed as `0408738` / integrated `00acde7`.
+
+### Historical zcode gate report
+
+The original handoff could not commit under zcode's
+Mimosa L3 pre-commit gate: it scanned the whole project on every commit
 and hard-blocks on two pre-existing high-severity findings in baseline files that this
 branch does not touch and that this branch is not allowed to touch (Codex/maintainer
 ownership per the contract):
@@ -214,7 +224,7 @@ blocks regardless because the baseline findings remain in the working tree. `--n
 does not help (the gate is not a git hook). Nothing in this branch was modified to work
 around the gate.
 
-Intended commits once the gate is resolved (each path list is complete):
+Original suggested commit split, superseded by the integration above:
 
 1. `feat(helper): add desktop helper protocol layer with unit tests` —
    `native/desktop-helper/.gitignore`, `src/protocol.h`, `src/protocol.cpp`,
