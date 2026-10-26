@@ -1,9 +1,8 @@
 /* Real Windows hook -> InputBridge -> production overlay/preload -> action executor.
  * Inputs are OS-injected into an owned window; browser/native effects are stubbed. */
 const { join, resolve } = require('node:path');
-const { mkdirSync, copyFileSync, readFileSync } = require('node:fs');
-const { createHash } = require('node:crypto');
-const { spawn, spawnSync } = require('node:child_process');
+const { mkdirSync, copyFileSync } = require('node:fs');
+const { spawnSync } = require('node:child_process');
 
 if (!process.versions.electron) {
   if (process.platform !== 'win32') { console.log('SKIP live-hook smoke: Windows only'); process.exit(0); }
@@ -29,7 +28,7 @@ if (!process.versions.electron) {
 
 function run() {
   const { app, BrowserWindow, screen, session } = require('electron');
-  const { createInterface } = require('node:readline');
+  const { injectOwnedGesture } = require('./ping-actions-input-client.cjs');
   const { registerAppScheme, serveAppScheme } = require('../src/main/appProtocol.ts');
   const { InputBridge } = require('../src/main/inputBridge.ts');
   const { OverlayManager } = require('../src/main/overlayManager.ts');
@@ -42,9 +41,6 @@ function run() {
   app.commandLine.appendSwitch('disable-background-networking');
   registerAppScheme();
   app.on('window-all-closed', () => {});
-  const driverPath = join(root, 'tools/ping-actions-hook-input.ps1');
-  const driverHash = createHash('sha256').update(readFileSync(driverPath)).digest('hex').slice(0, 16);
-  const driverAssembly = join(root, 'out/ping-actions-hook-smoke', `input-${driverHash}.dll`);
   let controller, manager, bridge, executor;
   let enabled = true;
   let suspended = false;
@@ -57,7 +53,6 @@ function run() {
   let activationClicks = 0;
   let stage = 'setup';
   let code = 1;
-  let routing = Promise.resolve();
   const events = [], legacy = [], shared = [], actions = [], urls = [], scenarios = [];
   const check = (condition, reason) => { if (!condition) throw new Error(reason); };
   const wait = async (condition, reason) => {
@@ -87,8 +82,10 @@ function run() {
       controller = new BrowserWindow({ x: display.workArea.x + 40, y: display.workArea.y + 40,
         width: 820, height: 480, show: true,
         webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+      controller.removeMenu();
       await controller.loadURL('data:text/html,<title>lolPing owned input fixture</title><p>Controlled input target</p>'
-        + '<script>window.counts={down:0,up:0};onmousedown=()=>counts.down++;onmouseup=()=>counts.up++;oncontextmenu=e=>e.preventDefault()</script>');
+        + '<script>window.counts={down:0,up:0};onmousedown=e=>{e.preventDefault();counts.down++};'
+        + 'onmouseup=e=>{e.preventDefault();counts.up++};ondragstart=oncontextmenu=e=>e.preventDefault()</script>');
       manager = new OverlayManager(overlaySettings(settings), () => ({ kind: 'placeholder' }));
       manager.start();
       executor = new QuickActionExecutor({ platform: 'win',
@@ -140,65 +137,10 @@ function run() {
         bridge.send(configCommand(settings, enabled));
         await paint();
       };
-      const inject = async (trigger, mode, held, armed = async () => {}) => {
-        // Another always-on-top desktop app may cover our foreground fixture.
-        controller.setAlwaysOnTop(true, 'pop-up-menu');
-        controller.moveTop();
-        controller.focus();
-        await wait(() => controller.isFocused(), 'ownedFixtureNotFocused');
-        const handle = controller.getNativeWindowHandle().readBigUInt64LE().toString();
-        await new Promise((done, reject) => {
-          const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
-            '-File', driverPath, '-DriverAssembly', driverAssembly, '-WindowHandle', handle,
-            '-OwnerPid', String(process.pid), '-Trigger', trigger, '-Mode', mode,
-            '-Distance', String(Math.round(160 * display.scaleFactor))], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-          let error = '', driverFailed = false;
-          const surfaces = [];
-          let released = false;
-          let killTimer;
-          const release = () => { if (!released) { released = true; child.stdin.end('release\n'); } };
-          const timeout = setTimeout(() => {
-            driverFailed = true; error = 'inputDriverTimeout'; release();
-            killTimer = setTimeout(() => child.kill(), 6000);
-          }, 15000);
-          child.stdin.on('error', () => { driverFailed = true; error = 'driverInputPipeClosed'; });
-          child.stderr.on('data', part => { error = (error + part.toString()).slice(-1200); });
-          child.on('error', reject);
-          createInterface({ input: child.stdout }).on('line', line => {
-            if (line.includes('"stage":"ready"')) {
-              routing = Promise.resolve().then(async () => {
-                controller.moveTop(); controller.focus();
-                await wait(() => !controller.isMinimized() && controller.isFocused(), 'fixtureFocusUnavailable');
-                child.stdin.write('start\n');
-              }).catch(reason => { driverFailed = true; error = reason.message; release(); });
-            }
-            if (line.includes('"stage":"error"')) { driverFailed = true; error = JSON.parse(line).code; }
-            if (line.includes('"stage":"surfaceGuard"') || line.includes('"stage":"windowGuard"')) {
-              const report = JSON.parse(line);
-              const known = BrowserWindow.getAllWindows().map(win => ({
-                handle: Number(win.getNativeWindowHandle().readBigUInt64LE()), isController: win === controller, bounds: win.getBounds(),
-              }));
-              surfaces.push({ ...report, known });
-            }
-            if (line.includes('"stage":"held"')) {
-              routing = Promise.resolve().then(held).then(release).catch(reason => {
-                driverFailed = true; error = reason.message; release();
-              });
-            }
-            if (line.includes('"stage":"armed"')) {
-              const report = JSON.parse(line);
-              if (report.activationClick) activationClicks++;
-              routing = Promise.resolve().then(() => armed(report.activationClick)).then(() => {
-                child.stdin.write('press\n');
-              }).catch(reason => { driverFailed = true; error = reason.message; release(); });
-            }
-          });
-          child.on('close', async status => {
-            clearTimeout(timeout); clearTimeout(killTimer);
-            await routing;
-            if (status !== 0 || driverFailed) reject(new Error('driverFailed:' + JSON.stringify(surfaces) + error)); else done();
-          });
-        });
+      const inject = async (trigger, mode, held, armed = async () => {}, released = async () => {}) => {
+        const result = await injectOwnedGesture({ root, window: controller, scaleFactor: display.scaleFactor,
+          trigger, mode, wait, onHeld: held, onArmed: armed, onReleased: released });
+        if (result.activationClick) activationClicks++;
       };
       const scenario = async (name, trigger, mode, expected, on = true, expectedAction = Boolean(expected && expected !== 'missing')) => {
         stage = name;
@@ -219,6 +161,10 @@ function run() {
             return current.down > before.pointer.down && current.up > before.pointer.up;
           }, 'fixtureActivationClickMissing');
           before.pointer = await pointer();
+        }, async () => {
+          if (gesture) await wait(() => events.slice(before.events).some(event =>
+            event.type === (mode === 'escape' || mode === 'rightCancel' ? 'cancel' : 'wheelRelease')), 'releaseNotObservedBeforeRestore');
+          else await wait(async () => (await pointer()).up > before.pointer.up, 'releaseNotPassedBeforeRestore');
         });
         if (expected) await wait(() => legacy.length > before.pings, 'legacyPingMissing');
         else if (gesture) await wait(() => events.slice(before.events).some(event => event.type === (mode === 'center' ? 'wheelRelease' : 'cancel')), 'cancelMissing');
@@ -243,8 +189,9 @@ function run() {
       stage = 'singleClickPingOnly';
       settings = { ...settings, clickPing: true };
       await configure('alt');
-      const clickBefore = { shared: shared.length, actions: actions.length, legacy: legacy.length };
-      await inject('alt', 'click', paint);
+      const clickBefore = { shared: shared.length, actions: actions.length, legacy: legacy.length, events: events.length };
+      await inject('alt', 'click', paint, async () => {}, () => wait(() =>
+        events.slice(clickBefore.events).some(event => event.type === 'click'), 'clickNotObservedBeforeRestore'));
       await wait(() => shared.length > clickBefore.shared, 'singleClickPingMissing');
       check(shared.length === clickBefore.shared + 1 && legacy.length === clickBefore.legacy
         && actions.length === clickBefore.actions, 'singleClickRanAction');

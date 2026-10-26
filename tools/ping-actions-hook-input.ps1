@@ -72,7 +72,8 @@ public static class LolPingHookInput {
       if (GetCursorPos(out actual) && actual.x == p.x && actual.y == p.y) return;
       Thread.Yield();
     }
-    throw new Exception("cursorMoveNotObserved");
+    GetCursorPos(out actual);
+    throw new Exception("cursorMoveNotObserved:" + (actual.x - p.x) + "," + (actual.y - p.y));
   }
   public static void Run(long handle, uint pid, string trigger, string mode, int distance) {
     Console.WriteLine("{\"stage\":\"ready\"}"); Console.Out.Flush();
@@ -145,9 +146,10 @@ public static class LolPingHookInput {
     } finally {
       if (buttonDown) Button(false, side);
       if (keyDown) Key(key, true);
-      if (GetForegroundWindow() == h) Move(original);
+      Console.WriteLine("{\"stage\":\"released\",\"osInjected\":true}"); Console.Out.Flush();
+      var restore = Console.In.ReadLineAsync();
+      if (restore.Wait(4000) && restore.Result == "restore" && GetForegroundWindow() == h) Move(original);
     }
-    Console.WriteLine("{\"stage\":\"released\",\"osInjected\":true}"); Console.Out.Flush();
   }
 }
 '@
