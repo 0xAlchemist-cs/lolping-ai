@@ -22,16 +22,22 @@ public static class LolPingSmokeInput {
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vk);
   [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
   public static bool Tap(uint owner) {
+    var foreground = GetForegroundWindow();
+    if (owner == 0 || foreground == IntPtr.Zero) return false;
     uint actual;
-    GetWindowThreadProcessId(GetForegroundWindow(), out actual);
+    GetWindowThreadProcessId(foreground, out actual);
     if (actual != owner) return false;
-    foreach (int vk in new int[]{0x10,0x11,0x12,0x5b,0x5c})
+    foreach (int vk in new int[]{1,2,4,5,6,0x10,0x11,0x12,0x5b,0x5c})
       if ((GetAsyncKeyState(vk) & 0x8000) != 0) return false;
     var down = new INPUT { type = 1 };
     down.data.key = new KEY { vk = 0xa4 };
     var up = new INPUT { type = 1 };
     up.data.key = new KEY { vk = 0xa4, flags = 2 };
-    return SendInput(2, new INPUT[]{down,up}, Marshal.SizeOf(typeof(INPUT))) == 2;
+    if (GetForegroundWindow() != foreground) return false;
+    uint inserted = SendInput(2, new INPUT[]{down,up}, Marshal.SizeOf(typeof(INPUT)));
+    // A partial insertion may have pressed our Alt without releasing it.
+    if (inserted == 1) SendInput(1, new INPUT[]{up}, Marshal.SizeOf(typeof(INPUT)));
+    return inserted == 2;
   }
 }
 '@

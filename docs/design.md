@@ -697,6 +697,9 @@ capture, pause, settings changes, window close and shutdown. Repeated capture-st
 are ignored: each settings KeyCapture control announces its initial false state, and those
 duplicates must not abort an unrelated action. The test checks an active child's probe
 response before actual cancellation and observes settings persistence and helper exit.
+The overlay/native smoke's `--no-input` option omits the test-only Alt tap for a separate
+caller-context comparison; it still requires actual minimize/restore effects. Diagnosis
+review and remaining blockers are recorded in `docs/p3-desktop-review.md`.
 Its `--latency` mode records 100 guarded OS-injected gestures from real input-helper
 stdout receipt in Main to the controlled `shell.openExternal` boundary. Browser startup,
 physical input and native application/desktop actions are outside that measurement.

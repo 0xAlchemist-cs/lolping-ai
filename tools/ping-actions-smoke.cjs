@@ -12,7 +12,7 @@ if (!process.versions.electron) {
   const root = resolve(__dirname, '..');
   const out = join(root, 'out/ping-actions-smoke');
   const dispatchOnly = process.argv.includes('--dispatch-only');
-  const nativeDir = resolve(process.argv[2] || join(root, 'native/desktop-helper/build'));
+  const nativeDir = resolve(process.argv.slice(2).find(arg => !arg.startsWith('--')) || join(root, 'native/desktop-helper/build'));
   mkdirSync(out, { recursive: true });
   if (!dispatchOnly) {
     copyFileSync(join(nativeDir, 'desktop-helper.exe'), join(out, 'desktop-helper.exe'));
@@ -21,7 +21,8 @@ if (!process.versions.electron) {
   require('esbuild').buildSync({ entryPoints: [__filename], outfile: join(out, 'main.cjs'), bundle: true,
     platform: 'node', format: 'cjs', external: ['electron', 'esbuild'], logLevel: 'silent' });
   const env = { ...process.env, LOLPING_PING_ACTION_SMOKE_ROOT: root,
-    LOLPING_DISPATCH_ONLY: dispatchOnly ? '1' : '0' };
+    LOLPING_DISPATCH_ONLY: dispatchOnly ? '1' : '0',
+    LOLPING_SMOKE_NO_INPUT: process.argv.includes('--no-input') ? '1' : '0' };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_RENDERER_URL;
   const result = spawnSync(require('electron'), [join(out, 'main.cjs'), '--user-data-dir=' + join(out, 'profile')],
@@ -47,6 +48,7 @@ function run() {
   app.on('window-all-closed', () => {});
   const out = join(root, 'out/ping-actions-smoke');
   const dispatchOnly = process.env.LOLPING_DISPATCH_ONLY === '1';
+  const noInput = process.env.LOLPING_SMOKE_NO_INPUT === '1';
   let releasedAt = 0;
   const dispatchMs = [];
   const desktop = new DesktopBridge({ command: join(out, 'desktop-helper.exe') });
@@ -60,6 +62,7 @@ function run() {
   const fixtureEvents = [];
   const activationReplies = [];
   let externalRequests = 0;
+  let osInjectedAlt = false;
   let stage = 'setup';
   let exitCode = 1;
   const results = [];
@@ -165,10 +168,13 @@ function run() {
       await wait(() => fixtureForeground, 'fixtureForegroundNotObserved');
       await wait(() => !fixtureMinimized, 'fixtureRestoreNotObserved');
       stage = 'userInputContext';
-      await new Promise((resolveInput, rejectInput) => execFile('powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-File', join(root, 'tools/ping-actions-input.ps1'),
-          '-TargetPid', String(fixture.pid)], { windowsHide: true, timeout: 10000 },
-        error => error ? rejectInput(new Error('controlledInputNotAvailable')) : resolveInput()));
+      if (!noInput) {
+        await new Promise((resolveInput, rejectInput) => execFile('powershell.exe',
+          ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-File', join(root, 'tools/ping-actions-input.ps1'),
+            '-TargetPid', String(fixture.pid)], { windowsHide: true, timeout: 10000 },
+          error => error ? rejectInput(new Error('controlledInputNotAvailable')) : resolveInput()));
+        osInjectedAlt = true;
+      }
       const startDip = { x: display.bounds.x + display.bounds.width / 2, y: display.bounds.y + display.bounds.height / 2 };
       const start = screen.dipToScreenRect(null, { ...startDip, width: 1, height: 1 });
       const distance = Math.round(200 * display.scaleFactor);
@@ -196,12 +202,13 @@ function run() {
       check(results.length === 2, 'questionMarkExecutedAction');
       check(externalRequests === 0, 'unexpectedNetwork');
       console.log(JSON.stringify({ status: 'PASS', productionWheel: true, productionSandboxPreload: true,
-        syntheticHelperEvents: true, osInjectedAlt: true, hardwareMouseVerified: false, nativeDesktop: true,
+        syntheticHelperEvents: true, osInjectedAlt, hardwareMouseVerified: false, nativeDesktop: true,
         actions: results, fixtureTransitions, questionMarkPreserved: true, externalRequests }));
       executor.close();
       exitCode = 0;
     } catch (error) {
-      console.log(JSON.stringify({ status: 'FAIL', stage, code: error.message, results, fixtureTransitions, fixtureEvents, activationReplies, externalRequests }));
+      console.log(JSON.stringify({ status: 'FAIL', stage, code: error.message, osInjectedAlt,
+        results, fixtureTransitions, fixtureEvents, activationReplies, externalRequests }));
     } finally {
       // Restore a minimized test fixture if a failed scenario left the system showing the desktop.
       if (fixtureMinimized) await desktop.run({ type: 'toggleDesktop' });

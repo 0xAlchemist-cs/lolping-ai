@@ -69,6 +69,16 @@ overlays, also accepted two toggle requests while observing no window effect (ex
 skip). This narrows the reproduction but does not establish the cause or rule out
 overlay interference in other conditions.
 
+The later zcode diagnosis handoff added a strict native effect mode. Codex independently
+rebuilt it with diagnostics disabled: 101 protocol units passed, but e2e ended with
+31 passed, 1 failed and 1 skipped (exit 1). Both toggle replies succeeded, with no fixture
+transition in either ten-second observation window. A production-overlay rerun using
+`--no-input` also failed at firstDesktopToggle despite `desktopToggled`; it injected no
+Alt and did not attempt the second wheel action after the first effect failed.
+The strict gate is useful, while causal/foreground exclusions and diagnostic input guards
+need revision. See `p3-desktop-review.md` for logs and the zcode follow-up. Shell state
+remains a hypothesis, not a complete exclusion of lolPing contributions.
+
 Microsoft documents ToggleDesktop as showing/hiding the desktop under the shell's own
 rules: [IShellDispatch4.ToggleDesktop](https://learn.microsoft.com/en-us/windows/win32/shell/ishelldispatch4-toggledesktop).
 A successful native request alone cannot satisfy the product's window-level acceptance.
@@ -103,7 +113,8 @@ Codex committed the native handoff and packaging with normal Git, without modify
 bypassing zcode's environment gate. External `feat/p3-packaging-ci` commit `0408738` was
 integrated as `00acde7`. Only the native module and the four agreed packaging paths were
 included; `.mimosa` state was excluded. The current zcode priority task is defined in
-`p3-zcode-desktop-diagnosis-task.md`. Codex completed the paused program-boundary coverage
+`p3-zcode-diagnosis-review-task.md` following the first handoff review recorded in
+`p3-desktop-review.md`. Codex completed the paused program-boundary coverage
 locally; see `p3-program-verification.md`. User direction is local fixes first, with no
 new pushes or PR creation. No PR was created; the earlier authorized branch push completed
 before the cancellation, and the remote branch remains at `3f8ea16`.
