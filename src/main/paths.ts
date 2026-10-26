@@ -16,6 +16,11 @@ export const helperExePath = (): string =>
     ? join(process.resourcesPath, HELPER_FILE)
     : join(app.getAppPath(), 'native', 'hook-helper', 'build', HELPER_FILE);
 
+/** Windows desktop actions use a separate one-shot child, never the input hook process. */
+export const desktopHelperExePath = (): string => app.isPackaged
+  ? join(process.resourcesPath, 'desktop-helper.exe')
+  : join(app.getAppPath(), 'native', 'desktop-helper', 'build', 'desktop-helper.exe');
+
 /** Files from build/ that ship as extraResources (the macOS menu bar icon). */
 export const buildResourcePath = (file: string): string =>
   app.isPackaged ? join(process.resourcesPath, file) : join(app.getAppPath(), 'build', file);

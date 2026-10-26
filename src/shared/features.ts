@@ -1,6 +1,6 @@
 import type { RoomFeatureOff } from './roomProtocol';
 
-export type FeatureId = 'emotes' | 'rooms' | 'roomText' | 'roomVotes' | 'roomPanel' | 'aiExplain';
+export type FeatureId = 'emotes' | 'rooms' | 'roomText' | 'roomVotes' | 'roomPanel' | 'aiExplain' | 'quickActions';
 export type Features = Record<FeatureId, boolean>;
 
 /** In the order of the Features page. A feature with `requires` counts as off while that one is off. */
@@ -11,14 +11,15 @@ export const FEATURES: readonly { id: FeatureId; requires?: FeatureId }[] = [
   { id: 'roomVotes', requires: 'rooms' },
   { id: 'roomPanel', requires: 'rooms' },
   { id: 'aiExplain' },
+  { id: 'quickActions' },
 ];
 
-/** `aiExplain` is off by default: it is the only feature that can open an extra window on its own. */
+/** Optional fork features start off until the user chooses to configure and enable them. */
 export const DEFAULT_FEATURES: Features = {
-  emotes: true, rooms: true, roomText: true, roomVotes: true, roomPanel: true, aiExplain: false,
+  emotes: true, rooms: true, roomText: true, roomVotes: true, roomPanel: true, aiExplain: false, quickActions: false,
 };
 
-/** Turns anything into a full Features object: a missing or non-boolean key falls back to on, unknown keys are dropped. */
+/** Missing or non-boolean keys use their own defaults; unknown keys are dropped. */
 export function normalizeFeatures(raw: unknown): Features {
   const r = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const out = { ...DEFAULT_FEATURES };

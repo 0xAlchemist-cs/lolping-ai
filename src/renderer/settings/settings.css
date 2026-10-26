@@ -102,6 +102,25 @@ main.content { overflow: auto; padding: 4px 28px 28px 20px; }
 .weHint { min-height: 16px; margin-top: 10px; font-size: 12px; line-height: 16px; color: var(--text3); }
 @media (max-width: 860px) { .weBody { grid-template-columns: 1fr; justify-items: center; } }
 .rowError { margin: 1px 0 4px; padding: 0 20px 0 60px; font-size: 12px; line-height: 16px; color: #ff9c48; }
+/* Quick action selection is separate from WheelEditor's rearrangement and previews. */
+.card.qaOverview, .card.qaEditor { display: block; padding: 16px 20px; }
+.card.qaOverview:hover, .card.qaEditor:hover { background: var(--card); }
+.qaOverviewBody { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; align-items: center; margin-top: 14px; }
+.qaWheel { position: relative; width: 300px; height: 300px; }
+.qaWheel svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.qaSlot { position: absolute; display: grid; place-items: center; width: 56px; height: 56px; margin: -28px; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.qaSlot img { width: 46px; height: 46px; pointer-events: none; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+.qaSlot:hover img { transform: scale(1.1); }
+.qaSlot[aria-pressed="true"] { outline: 2px solid var(--colorBrandStroke1); }
+.qaSlot:focus-visible, .qaTile:focus-visible { outline: 2px solid var(--colorStrokeFocus2); outline-offset: 2px; }
+.qaTile { font-family: inherit; cursor: pointer; }
+.qaReserved { font-size: 10px; color: var(--colorBrandForeground1); }
+.qaEditor > * + * { margin-top: 12px; }
+.qaEditor > .desc { display: block; }
+.qaEditor [role="combobox"] { min-width: 230px; }
+.qaProgram, .qaButtons { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.qaProgram > :first-child { flex: 1; min-width: 180px; }
+@media (max-width: 980px) { .qaOverviewBody { grid-template-columns: 1fr; justify-items: center; } .qaPool { width: 100%; } }
 .keys { display: flex; align-items: center; gap: 4px; }
 .keys kbd { font: 600 12px "Segoe UI"; padding: 3px 8px; border-radius: 4px; background: var(--colorBrandBackground); color: var(--colorNeutralForegroundOnBrand); }
 @media (max-width: 760px) { .app { grid-template-columns: 1fr; } nav.side { display: none; } }

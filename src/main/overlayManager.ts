@@ -2,7 +2,7 @@ import { BrowserWindow, ipcMain, screen, type Display, type Rectangle, type WebC
 import { EventEmitter } from 'node:events';
 import { isEmoteRefShape, type EmoteArt, type EmoteRef } from '../shared/emotes';
 import {
-  OVERLAY_ASSETS, OVERLAY_EMOTED, OVERLAY_PINGED, type OverlayChannel, type OverlayEvents, type PingTag,
+  OVERLAY_ASSETS, OVERLAY_EMOTED, OVERLAY_PINGED, OVERLAY_QUICK_ACTION, type OverlayChannel, type OverlayEvents, type PingTag,
 } from '../shared/ipc';
 import { isPingId, type PingId } from '../shared/pings';
 import type { HelperEvent, WheelKind } from '../shared/protocol';
@@ -10,6 +10,7 @@ import type { OverlaySettings, RoomTextStyle } from '../shared/settings';
 import { physicalToLocal, type DisplayMap } from './coords';
 import { numberDisplays, type NumberedDisplay } from './displayNumbers';
 import { IS_LINUX, IS_MAC, loadPage, preloadPath } from './paths';
+import { WheelActionSession } from './wheelActionSession';
 
 /** A ping the user just placed, in overlay-local CSS px: the room shares these. */
 export interface SharedPing {
@@ -56,6 +57,8 @@ export class OverlayManager extends EventEmitter {
   private numberedList: NumberedDisplay[] = [];
   private wheelDisplay: number | null = null;
   private wheelKind: WheelKind = 'ping';
+  private quickActionsEnabled = false;
+  private readonly actionSession = new WheelActionSession();
 
   /** `resolveArt` says what an emote looks like: `remote` is true for a room member's, whose files may be missing here. */
   constructor(private settings: OverlaySettings, private readonly resolveArt: (ref: EmoteRef, remote: boolean) => EmoteArt) {
@@ -63,6 +66,13 @@ export class OverlayManager extends EventEmitter {
   }
 
   start(): void {
+    ipcMain.on(OVERLAY_QUICK_ACTION, (event, raw: unknown) => {
+      if (!this.quickActionsEnabled || event.senderFrame == null) return;
+      const displayId = this.displayOf(event.sender);
+      if (displayId === undefined || event.senderFrame !== event.sender.mainFrame) return;
+      const id = this.actionSession.consume(displayId, raw);
+      if (id !== null) this.emit('quickAction', id);
+    });
     ipcMain.on(OVERLAY_ASSETS, (_event, missing: unknown) => {
       if (!Array.isArray(missing)) return;
       for (const m of missing) if (typeof m === 'string') this.missingAssets.add(m);
@@ -94,19 +104,30 @@ export class OverlayManager extends EventEmitter {
   }
 
   updateSettings(s: OverlaySettings): void {
+    this.actionSession.cancel();
     this.settings = s;
     for (const id of this.windows.keys()) this.send(id, 'overlay:settings', s);
   }
 
+  /** Feature and app availability gate only the new action reports, never existing ping/AI behavior. */
+  setQuickActionsEnabled(on: boolean): void {
+    this.actionSession.cancel();
+    this.quickActionsEnabled = on && !IS_MAC && !IS_LINUX;
+  }
+
   handle(ev: HelperEvent): void {
     // A wheel or a click is placed from screen coordinates, so stale display info would clip or misplace it.
-    if (ev.type === 'wheelOpen' || ev.type === 'click') this.refreshDisplays();
+    if (ev.type === 'wheelOpen' || ev.type === 'click' || ev.type === 'wheelRelease' && this.quickActionsEnabled) this.refreshDisplays();
     switch (ev.type) {
       case 'wheelOpen': {
+        this.actionSession.cancel();
         const p = physicalToLocal(ev.x, ev.y, this.maps);
         if (!p) return;
         this.wheelDisplay = p.displayId;
         this.wheelKind = ev.wheel;
+        if (this.quickActionsEnabled && ev.wheel === 'ping') {
+          this.actionSession.begin({ ...p, wheel: this.settings.wheel, wheelSizePx: this.settings.wheelSizePx });
+        }
         this.send(p.displayId, 'wheel:open', { x: p.x, y: p.y, wheel: ev.wheel });
         break;
       }
@@ -115,7 +136,11 @@ export class OverlayManager extends EventEmitter {
         if (this.wheelDisplay === null) return;
         const p = physicalToLocal(ev.x, ev.y, this.maps, this.wheelDisplay);
         if (!p) return;
-        this.send(p.displayId, ev.type === 'wheelMove' ? 'wheel:move' : 'wheel:release', { x: p.x, y: p.y, wheel: this.wheelKind });
+        const sessionId = ev.type === 'wheelRelease' ? this.actionSession.release(p.displayId, p.x, p.y) : null;
+        this.send(p.displayId, ev.type === 'wheelMove' ? 'wheel:move' : 'wheel:release', {
+          x: p.x, y: p.y, wheel: this.wheelKind,
+          ...(sessionId === null ? {} : { quickActionSession: sessionId }),
+        });
         if (ev.type === 'wheelRelease') this.wheelDisplay = null;
         break;
       }
@@ -185,6 +210,7 @@ export class OverlayManager extends EventEmitter {
   }
 
   destroy(): void {
+    this.actionSession.cancel();
     for (const w of this.windows.values()) if (!w.isDestroyed()) w.destroy();
     this.windows.clear();
   }
@@ -197,6 +223,7 @@ export class OverlayManager extends EventEmitter {
 
   /** Dismisses a wheel that is on screen, if any. Also used when the helper stops: its cancel would never arrive. */
   cancelWheel(): void {
+    this.actionSession.cancel();
     if (this.wheelDisplay === null) return;
     this.send(this.wheelDisplay, 'wheel:cancel', null);
     this.wheelDisplay = null;
@@ -291,6 +318,8 @@ export class OverlayManager extends EventEmitter {
       win.setHiddenInMissionControl(true); // the overlay isn't a window to the user: keep it out of Mission Control
     }
     win.webContents.on('did-finish-load', () => win.webContents.send('overlay:settings', this.settings));
+    win.webContents.on('render-process-gone', () => this.actionSession.cancel());
+    win.webContents.on('did-start-navigation', () => this.actionSession.cancel());
     win.once('ready-to-show', () => {
       win.showInactive();
       win.setBounds(overlayBounds(d)); // re-apply: mixed-DPI setups can size the first frame wrong
