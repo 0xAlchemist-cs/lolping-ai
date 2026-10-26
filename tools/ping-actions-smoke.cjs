@@ -11,13 +11,17 @@ if (!process.versions.electron) {
   }
   const root = resolve(__dirname, '..');
   const out = join(root, 'out/ping-actions-smoke');
+  const dispatchOnly = process.argv.includes('--dispatch-only');
   const nativeDir = resolve(process.argv[2] || join(root, 'native/desktop-helper/build'));
   mkdirSync(out, { recursive: true });
-  copyFileSync(join(nativeDir, 'desktop-helper.exe'), join(out, 'desktop-helper.exe'));
-  copyFileSync(join(nativeDir, 'fixture_app.exe'), join(out, 'fixture_app.exe'));
+  if (!dispatchOnly) {
+    copyFileSync(join(nativeDir, 'desktop-helper.exe'), join(out, 'desktop-helper.exe'));
+    copyFileSync(join(nativeDir, 'fixture_app.exe'), join(out, 'fixture_app.exe'));
+  }
   require('esbuild').buildSync({ entryPoints: [__filename], outfile: join(out, 'main.cjs'), bundle: true,
     platform: 'node', format: 'cjs', external: ['electron', 'esbuild'], logLevel: 'silent' });
-  const env = { ...process.env, LOLPING_PING_ACTION_SMOKE_ROOT: root };
+  const env = { ...process.env, LOLPING_PING_ACTION_SMOKE_ROOT: root,
+    LOLPING_DISPATCH_ONLY: dispatchOnly ? '1' : '0' };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_RENDERER_URL;
   const result = spawnSync(require('electron'), [join(out, 'main.cjs'), '--user-data-dir=' + join(out, 'profile')],
@@ -42,6 +46,9 @@ function run() {
   registerAppScheme();
   app.on('window-all-closed', () => {});
   const out = join(root, 'out/ping-actions-smoke');
+  const dispatchOnly = process.env.LOLPING_DISPATCH_ONLY === '1';
+  let releasedAt = 0;
+  const dispatchMs = [];
   const desktop = new DesktopBridge({ command: join(out, 'desktop-helper.exe') });
   let manager;
   let controller;
@@ -81,7 +88,11 @@ function run() {
       manager.start();
       manager.setQuickActionsEnabled(true);
       const executor = new QuickActionExecutor({
-        platform: 'win', desktop,
+        platform: 'win', desktop: { run: request => {
+          if (!dispatchOnly) return desktop.run(request);
+          dispatchMs.push(performance.now() - releasedAt);
+          return Promise.resolve({ type: 'result', status: 'desktopToggled' });
+        } },
         verifyProgram: async () => ({ ok: false, code: 'invalidProgram' }),
         launchProgram: async () => { throw new Error('unexpectedLaunch'); },
         openUrl: async () => { throw new Error('unexpectedUrl'); },
@@ -104,6 +115,31 @@ function run() {
       manager.spawnRemote({ id: 'omw', displayId: display.id, x: 100, y: 100, tag: { name: 'Fixture', color: 0 } });
       await paint();
       check(results.length === 0, 'unreleasedActionExecuted');
+      if (dispatchOnly) {
+        stage = 'syntheticDispatchBenchmark';
+        const origin = { x: display.bounds.x + display.bounds.width / 2, y: display.bounds.y + display.bounds.height / 2 };
+        const start = screen.dipToScreenRect(null, { ...origin, width: 1, height: 1 });
+        const distance = Math.round(200 * display.scaleFactor);
+        for (let sample = 0; sample < 100; sample++) {
+          manager.handle({ type: 'wheelOpen', wheel: 'ping', x: start.x, y: start.y });
+          await paint();
+          manager.handle({ type: 'wheelMove', wheel: 'ping', x: start.x + distance, y: start.y });
+          releasedAt = performance.now();
+          manager.handle({ type: 'wheelRelease', wheel: 'ping', x: start.x + distance, y: start.y });
+          await wait(() => results.length === sample + 1, 'benchmarkActionMissing');
+          check(results[sample].ok && results[sample].id === 'omw', 'benchmarkActionFailed');
+        }
+        const sorted = [...dispatchMs].sort((a, b) => a - b);
+        const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+        check(p95 <= 100, 'syntheticDispatchOver100ms');
+        console.log(JSON.stringify({ status: 'PASS', syntheticHelperEvents: true,
+          productionWheelAndPreload: true, nativeExecutorStubbed: true, hardwareMouseVerified: false,
+          desktopEffectVerified: false, samples: sorted.length, p50Ms: sorted[49], p95Ms: p95,
+          maxMs: sorted[99], externalRequests }));
+        executor.close();
+        exitCode = 0;
+        return;
+      }
       fixture = spawn(join(out, 'fixture_app.exe'), ['minimized'], { windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] });
       fixture.stderr.resume();
       fixture.on('exit', (code) => fixtureEvents.push(`exit:${code}`));

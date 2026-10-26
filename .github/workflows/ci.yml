@@ -72,6 +72,7 @@ jobs:
       # The preload bundle tests skip without a build; rerun them against the fresh production output.
       - run: npx vitest run tests/main/preloadBundle.test.ts
       - run: npm run build:site
+      - run: node tools/verify-desktop-package-smoke.cjs
       # Full Windows package (both helpers are built inside dist) plus a resource check on the
       # unpacked directory.
       - run: npm run dist

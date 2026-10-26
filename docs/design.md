@@ -681,3 +681,6 @@ and preload code with synthetic input-bridge events, an owned native window and 
 OS-injected Alt tap. It strictly observes two desktop toggles and preserves the legacy question-mark
 report. These tests make no physical-mouse, elevated-window or mixed-DPI acceptance claim. Native GUI
 checks expose skipped observations when the session cannot provide foreground or desktop state.
+The smoke's `--dispatch-only` mode measures 100 production-overlay IPC round trips to a stubbed
+native request boundary. It never toggles the desktop and is separate from full-app performance
+and physical input acceptance.

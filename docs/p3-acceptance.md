@@ -30,11 +30,18 @@ Existing dependencies were reused through the local junction; no lockfile change
 | `node tools/clipboard-smoke.cjs` | PASS | Controlled clipboard cases; fixture output only |
 | `node tools/settings-input-smoke.cjs` | PASS | Real Fluent controls, controlled settings IPC |
 | `node tools/quick-actions-smoke.cjs` | PASS | Real Fluent controls; 3 saves, 2 synthetic tests, 3 picks, 1 removal; bilingual/platform/stale-draft guards |
+| `node tools/ping-actions-smoke.cjs --dispatch-only` | 100 samples; P50 3.30ms, P95 10.83ms, max 13.25ms; exit 0 | Production overlay/preload IPC from Main release to executor's native-request boundary; native result stubbed, no desktop effects or physical gesture |
 | `electron-builder --win --x64 --dir --publish never` | exit 0 | Current integrated unpacked Windows build, cached Electron artifact |
-| `node tools/verify-desktop-package.cjs release/win-unpacked/resources` | exit 0 | Both production helpers are regular files; no top-level native fixtures/test artifacts |
+| `electron-builder --win --x64 --publish never` with workspace `ELECTRON_BUILDER_CACHE` | exit 0 | Full NSIS installer, 171859906 bytes; downloaded standard NSIS/7zip resources; not installed or published |
+| `node tools/verify-desktop-package.cjs release/win-unpacked/resources` | exit 0 | Both production helpers are regular files; no native fixtures/test artifacts; all 226 actual app.asar entries restricted to production paths |
+| `node tools/verify-desktop-package-smoke.cjs` | 6 fixture cases, exit 0 | Resource-only/valid archive pass; missing helper, leaked smoke profile, leaked fixture and malformed archive fail |
 
 The AI smoke tools use synthetic data or injected local implementations. No paid API was
 called. External HTTP requests were zero in the tools that report that counter.
+The first full installer attempt failed with `EXDEV` while renaming electron-builder's
+profile-cache extraction directory. Its supported `ELECTRON_BUILDER_CACHE` override under
+`out/builder-cache` resolved the failure. The application/package configuration was not
+weakened; the build cache is excluded from `app.asar` by the production allowlist.
 
 ## Strict desktop observation: unresolved
 
@@ -70,10 +77,11 @@ actions, inject production shortcuts or suppress existing features to obtain a p
   activation, and UAC/elevated targets. Controlled fixtures cover part of this matrix.
 - 100/150/200% DPI, mixed monitors, cross-screen gestures, monitor removal and display-mode
   changes; lock/unlock and secure-desktop return.
-- Same-machine CPU/memory baseline and release-to-dispatch P95 measurement (target ≤100ms);
-  no performance claim has been established by the functional tests.
-- Full NSIS installer build and remote Windows/macOS/Linux CI. Only the Windows unpacked
-  build was run locally. See `p3-packaging-verification.md` for zcode's separate report.
+- Same-machine CPU/memory baseline and full-app physical release-to-dispatch P95 measurement
+  (target ≤100ms). The scoped synthetic IPC measurement above excludes input-hook delivery,
+  actual native child spawning, URL browser opening and application filesystem checks.
+- Installer installation/upgrade smoke and remote Windows/macOS/Linux CI. The local full
+  NSIS build passed; see `p3-packaging-verification.md` for zcode's earlier, narrower report.
 - Human UI review and screenshot, and review of the complete diff before merge.
 
 ## Coordination
