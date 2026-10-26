@@ -8,7 +8,7 @@ Codex will prepare `D:/lolping/lolPing-p3-desktop` on the new branch `feat/p3-pa
 
 Read `AGENTS.md` and this brief. This task supersedes the former native-only ownership for these NEW paths only:
 
-- `package.json`: scripts and the Windows `extraResources` list only.
+- `package.json`: scripts, Windows `extraResources`, and the `build.files` production-file allowlist only.
 - `.github/workflows/ci.yml`: Windows build/test/package checks only; preserve existing macOS/Linux jobs.
 - `tools/verify-desktop-package.cjs`: a small resource verifier, if needed.
 - `docs/p3-packaging-verification.md`: truthful progress, commands and results.
@@ -19,6 +19,7 @@ Do not edit native sources/tests, Main, IPC/preload, shared types, renderer, i18
 
 1. Add `build:desktop` and `test:desktop` scripts invoking the native module's existing run.mjs. Extend Windows `dist` so both existing input helper and desktop helper are built before packaging. Do not add Windows builds to macOS/Linux dist commands.
 2. Add only `native/desktop-helper/build/desktop-helper.exe` as Windows extraResources `desktop-helper.exe`, beside `hook-helper.exe`. Never package fixtures, unit-test executables, native object files, user settings or smoke profiles.
+   The existing `out/**/*` file pattern also includes local smoke bundles/profiles. Restrict it to the three production directories (`out/main/**/*`, `out/preload/**/*`, `out/renderer/**/*`) and `package.json`, preserving any other required production files. Verify an existing smoke directory is excluded from the package, not just the native extraResources list.
 3. Extend the Windows CI job to build/test the desktop helper and verify its packaged resource. Keep existing typecheck, input-helper tests, Vitest, production build and site build. The local existing input-helper test macro needs `CL=/utf-8 /Zc:preprocessor` with MSVC 14.44; set this only for Windows build/test steps where needed, without changing input sources.
 4. After a production build, exercise the independent production preload tests. Avoid adding a second competing GUI suite or silently claiming physical/UAC/DPI desktop acceptance. Existing native test skips remain visible in logs.
 5. Build a local unpacked Windows application using the installed packager and existing caches; verify resources contain both required helpers and exclude native fixtures. No publishing or app release. If a required artifact is missing and a network download is needed, document that exact blocker rather than installing or downloading without coordination.
