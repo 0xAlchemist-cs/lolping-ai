@@ -697,3 +697,12 @@ capture, pause, settings changes, window close and shutdown. Repeated capture-st
 are ignored: each settings KeyCapture control announces its initial false state, and those
 duplicates must not abort an unrelated action. The test checks an active child's probe
 response before actual cancellation and observes settings persistence and helper exit.
+Its `--latency` mode records 100 guarded OS-injected gestures from real input-helper
+stdout receipt in Main to the controlled `shell.openExternal` boundary. Browser startup,
+physical input and native application/desktop actions are outside that measurement.
+`tools/ping-actions-idle-benchmark.cjs` compares an exported, built baseline with the current
+built Main in ABBA order. Both use isolated offline profiles, the same input-helper binary
+and no settings window. It samples only owned Electron/input processes, excludes intervals
+with changed process identities or recent session input, and reports insufficient idle
+samples as incomplete. Raw snapshots and timing scope are described in
+`docs/p3-performance-verification.md`; these tools never run in the product.

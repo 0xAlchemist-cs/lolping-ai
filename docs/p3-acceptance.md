@@ -32,6 +32,9 @@ Existing dependencies were reused through the local junction; no lockfile change
 | `node tools/quick-actions-smoke.cjs` | PASS | Real Fluent controls; 3 saves, 2 synthetic tests, 3 picks, 1 removal; bilingual/platform/stale-draft guards |
 | `node tools/ping-actions-hook-smoke.cjs` | 17 cases passed, exit 0 | Unchanged real input helper → InputBridge → production overlay/preload → executor; OS-injected input, open operation stubbed, Main availability harnessed; 11 releases, 10 wheel Pings, 7 recorded actions; no desktop effects |
 | `node tools/ping-actions-app-smoke.cjs` | 18 scenarios passed, exit 0 | Actual built Main entry, real settings/preload/store/Hook; browser/dialog/native-job boundaries controlled; real capture/pause/close/config cancellation and graceful shutdown; 8 wheel Pings, 6 recorded URLs, 3 canceled children, 0 program launches or HTTP requests |
+| `node tools/ping-actions-idle-benchmark.cjs out/p3-performance/baseline-34f0e070` | ABBA comparison passed; 20 accepted idle intervals per version | Actual baseline/current built Main, identical dependencies/input-helper binary, isolated offline profiles; current mean CPU 1.759% of one core, working-set sum 524.10 MiB, private allocation 357.42 MiB; see `p3-performance-verification.md` for baseline and limits |
+| `node tools/ping-actions-idle-benchmark.cjs --enabled-only` | 10 accepted idle intervals, exit 0 | Enabled with a saved web binding; one input helper, zero desktop-helper launches or external requests |
+| `node tools/ping-actions-app-smoke.cjs --latency` | Two 100-sample runs passed; P95 9.47ms and 8.30ms; maxima 11.26ms and 10.20ms | Full Main, OS-injected guarded gestures; helper stdout receipt to controlled browser-request interface, excluding hardware/hook delivery and actual OS/browser work |
 | `node tools/ping-actions-smoke.cjs --dispatch-only` | 100 samples; P50 3.30ms, P95 10.83ms, max 13.25ms; exit 0 | Production overlay/preload IPC from Main release to executor's native-request boundary; native result stubbed, no desktop effects or physical gesture |
 | `electron-builder --win --x64 --dir --publish never` | exit 0 | Current integrated unpacked Windows build, cached Electron artifact |
 | `electron-builder --win --x64 --publish never` with workspace `ELECTRON_BUILDER_CACHE` | exit 0 | Full NSIS installer rebuilt with the capture-state fix, 171861103 bytes; not installed or published |
@@ -85,9 +88,11 @@ actions, inject production shortcuts or suppress existing features to obtain a p
   activation, and UAC/elevated targets. Controlled fixtures cover part of this matrix.
 - 100/150/200% DPI, mixed monitors, cross-screen gestures, monitor removal and display-mode
   changes; lock/unlock and secure-desktop return.
-- Same-machine CPU/memory baseline and full-app physical release-to-dispatch P95 measurement
-  (target ≤100ms). The scoped synthetic IPC measurement above excludes input-hook delivery,
-  actual native child spawning, URL browser opening and application filesystem checks.
+- Full-app physical release-to-system-request P95 measurement (target ≤100ms), cold first
+  actions, sustained actions/failures/timeouts and actual native/browser costs. The local
+  same-machine idle baseline and real-hook-to-controlled-browser measurements are recorded
+  in `p3-performance-verification.md`; their short sampling and external-boundary limits
+  do not complete these remaining checks.
 - Installer installation/upgrade smoke and remote Windows/macOS/Linux CI. The local full
   NSIS build passed; see `p3-packaging-verification.md` for zcode's earlier, narrower report.
 - Human UI review and screenshot, and review of the complete diff before merge.

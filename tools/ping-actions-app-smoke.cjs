@@ -18,8 +18,10 @@ if (!process.versions.electron) {
   delete env.ELECTRON_RENDERER_URL;
   env.LOLPING_APP_SMOKE_ROOT = root;
   env.LOLPING_APP_SMOKE_RUN = runDir;
+  if (process.argv.includes('--latency')) env.LOLPING_APP_SMOKE_LATENCY = '1';
   const child = spawnSync(require('electron'), [join(out, 'main.cjs'), '--user-data-dir=' + join(runDir, 'profile')],
-    { cwd: root, env, windowsHide: true, encoding: 'utf8', timeout: 120000 });
+    { cwd: root, env, windowsHide: true, encoding: 'utf8', timeout: process.argv.includes('--latency') ? 240000 : 120000,
+      stdio: process.argv.includes('--latency') ? ['ignore', 'inherit', 'inherit'] : 'pipe' });
   if (child.stdout) process.stdout.write(child.stdout);
   if (child.stderr) process.stderr.write(child.stderr);
   let report;
@@ -30,7 +32,11 @@ if (!process.versions.electron) {
     if (saved.quickActions?.bindings?.omw?.name !== 'Final saved website' || saved.quickActions.bindings.missing) {
       console.log(JSON.stringify({ status: 'FAIL', stage: 'persistedSettings' })); process.exit(1);
     }
-    console.log(JSON.stringify({ ...report, settingsPersistedAfterQuit: true }));
+    if (process.argv.includes('--latency')) {
+      const { releaseToUrlRequestMs, ...summary } = report;
+      console.log(JSON.stringify({ ...summary, samples: releaseToUrlRequestMs.length,
+        report: join(runDir, 'report.json'), settingsPersistedAfterQuit: true }));
+    } else console.log(JSON.stringify({ ...report, settingsPersistedAfterQuit: true }));
   } else console.log(JSON.stringify({ status: 'FAIL', stage: report?.stage ?? 'launcher',
     code: child.error?.code ?? report?.reason ?? 'entryPointFailed', inputExited: report?.inputExited,
     exitCode: child.status }));
@@ -69,6 +75,9 @@ function run() {
   app.commandLine.appendSwitch('disable-background-networking');
   const realSpawn = cp.spawn;
   const urls = [], hookEvents = [], wheelPings = [], nativeJobs = [], inputChildren = [], scenarios = [], cancellationMs = [];
+  const releaseToUrlRequestMs = [];
+  let latencySummary = null;
+  let measuringLatency = false, releasedAt = null, releaseConsumed = true;
   let externalRequests = 0, mainFetches = 0, programLaunches = 0, activationClicks = 0, dialogCalls = 0;
   let settingsWindow, controller;
   let stage = 'startup';
@@ -82,7 +91,7 @@ function run() {
     browserOpenStubbed: true, pickerDialogStubbed: true, nativeActivationChildStubbed: true,
     desktopEffectsVerified: false, inputExited: inputChildren.length === 1 && inputChildren.every(child => child.exitCode !== null || child.signalCode !== null),
     scenarios, wheelPings: wheelPings.length, recordedUrls: urls.length, nativeJobs: nativeJobs.length,
-    programLaunches, cancellationMs, fixtureActivationClicks: activationClicks, mainFetches, externalRequests }));
+    programLaunches, cancellationMs, releaseToUrlRequestMs, latencySummary, fixtureActivationClicks: activationClicks, mainFetches, externalRequests }));
   const wait = async (condition, why) => {
     const deadline = Date.now() + 8000;
     while (Date.now() < deadline) {
@@ -101,7 +110,14 @@ function run() {
   const checkpoint = step => writeFileSync(join(runDir, 'checkpoint.json'), JSON.stringify({ step, stage,
     dialogCalls, nativeJobs: nativeJobs.length, nativeWaiting: nativeJobs.at(-1)?.waiting }));
   const pass = name => { scenarios.push(name); report(); checkpoint(name); console.log(JSON.stringify({ progress: name })); };
-  const recordOpen = async url => { urls.push(url); };
+  const recordOpen = async url => {
+    if (measuringLatency) {
+      check(releasedAt !== null && !releaseConsumed, 'latencyRequestWithoutNewRelease');
+      releaseToUrlRequestMs.push(performance.now() - releasedAt);
+      releaseConsumed = true;
+    }
+    urls.push(url);
+  };
   shell.openExternal = recordOpen;
   check(shell.openExternal === recordOpen, 'browserBoundaryNotControlled');
   globalThis.fetch = async () => { mainFetches++; throw new Error('unexpectedMainFetch'); };
@@ -117,7 +133,15 @@ process.on('message',message=>{if(message==='probe')process.send({probed:true});
     if (file === 'hook-helper.exe') {
       const child = realSpawn(command, args, options);
       inputChildren.push(child);
-      createInterface({ input: child.stdout }).on('line', line => { try { hookEvents.push(JSON.parse(line)); } catch {} });
+      // Registered before InputBridge's reader, so the timestamp precedes Main's release handling.
+      createInterface({ input: child.stdout }).on('line', line => {
+        const receivedAt = performance.now();
+        try {
+          const event = JSON.parse(line);
+          if (event.type === 'wheelRelease') { releasedAt = receivedAt; releaseConsumed = false; }
+          hookEvents.push(event);
+        } catch {}
+      });
       child.on('exit', () => { if (shuttingDown) report(); });
       return child;
     }
@@ -226,7 +250,7 @@ report:()=>ipcRenderer.send(${JSON.stringify(OVERLAY_QUICK_ACTION)},{sessionId:9
       await controller.webContents.executeJavaScript('window.probe.report()');
       pass('foreignWindowCannotSaveTestOrReport');
       const pointer = () => controller.webContents.executeJavaScript('({...window.counts})');
-      const gesture = async (name, mode, expectedPing, urlDelta, passThrough = false) => {
+      const gesture = async (name, mode, expectedPing, urlDelta, passThrough = false, record = true) => {
         stage = name;
         const before = { urls: urls.length, pings: wheelPings.length, events: hookEvents.length, pointer: await pointer() };
         const result = await injectOwnedGesture({ root, window: controller, scaleFactor: display.scaleFactor,
@@ -248,11 +272,34 @@ report:()=>ipcRenderer.send(${JSON.stringify(OVERLAY_QUICK_ACTION)},{sessionId:9
         if (passThrough) await wait(async () => (await pointer()).up > before.pointer.up, 'passThroughUpMissing');
         check(wheelPings.length === before.pings + (expectedPing ? 1 : 0) && urls.length === before.urls + urlDelta, 'unexpectedPingOrAction');
         if (expectedPing) check(wheelPings.at(-1) === expectedPing, `wrongIconSelected:${wheelPings.at(-1)}`);
-        pass(name);
+        if (record) pass(name);
       };
       await gesture('featureOffPreservesPing', 'right', 'omw', 0);
       await set({ features: { ...(await current()).features, quickActions: true } });
       await gesture('fullMainRealHookDispatch', 'right', 'omw', 1);
+      if (process.env.LOLPING_APP_SMOKE_LATENCY === '1') {
+        measuringLatency = true;
+        for (let index = 0; index < 100; index++) {
+          await gesture(`latencySample${index + 1}`, 'right', 'omw', 1, false, false);
+          check(releaseToUrlRequestMs.length === index + 1, 'latencySampleMissing');
+          if ((index + 1) % 20 === 0) {
+            report(); checkpoint(`latencySamples${index + 1}`);
+            console.log(JSON.stringify({ progress: 'latencySamples', count: index + 1 }));
+          }
+        }
+        measuringLatency = false;
+        check(mainFetches === 0 && externalRequests === 0 && nativeJobs.length === 0 && programLaunches === 0, 'latencyExternalEffects');
+        await saveWeb('Final saved website');
+        const sorted = [...releaseToUrlRequestMs].sort((a, b) => a - b);
+        latencySummary = { samples: sorted.length,
+          p50Ms: sorted[49], p95Ms: sorted[94], maxMs: sorted[99],
+          percentileMethod: 'nearest rank',
+          scope: 'real hook stdout receipt in Main to controlled shell.openExternal request' };
+        console.log(JSON.stringify({ progress: 'latencyComplete', ...latencySummary }));
+        pass('hundredRealHookReleaseToUrlRequests');
+        outcome = 'PASS'; reason = null; stage = 'gracefulQuit';
+        return;
+      }
       const wheel = [...(await current()).wheel];
       [wheel[2], wheel[6]] = [wheel[6], wheel[2]];
       await set({ wheel });

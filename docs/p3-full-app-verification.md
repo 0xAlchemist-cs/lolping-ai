@@ -61,8 +61,8 @@ desktop child is spawned for startup or web actions. Cancellation is asserted be
 1.2 seconds after each real lifecycle change, distinct from the 3-second helper timeout.
 The input child is observed exiting during actual Main shutdown. The launcher reads
 the final saved binding after exit, confirming persistence through the real store.
-The final run measured controlled-child cancellation at 44.6ms for settings close, 31.7ms
-for pause and 31.6ms for a settings change. These are Main/process-cancellation observations
+The latest rerun measured controlled-child cancellation at 23.5ms for settings close, 31.0ms
+for pause and 29.8ms for a settings change. These are Main/process-cancellation observations
 against the fixture child, not native activation performance or release-to-dispatch P95.
 
 ## Product bug found and fixed
@@ -89,7 +89,10 @@ the same owned-window guards as the 17-case real-hook smoke.
 The final driver acknowledges actual release before restoring the pointer. Its inert input
 window suppresses browser drag/selection defaults without altering production UI features.
 
+The separate `p3-performance-verification.md` records same-machine idle CPU/memory and
+100 real-hook release-to-controlled-browser-request samples. `--latency` uses the same
+complete Main setup but runs the timing scenario instead of the lifecycle matrix.
 Hardware mouse, UAC/elevated targets, mixed DPI/multiple displays, secure-desktop return,
-actual program/browser behavior, real desktop restoration, installer installation/upgrade,
-baseline CPU/memory and full physical dispatch latency remain open. This test does not
-resolve zcode's separate ToggleDesktop investigation and makes no paid API calls.
+actual program/browser behavior, real desktop restoration, installer installation/upgrade
+and full physical dispatch latency remain open. This test does not resolve zcode's
+separate ToggleDesktop investigation and makes no paid API calls.
