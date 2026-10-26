@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EmoteArt } from '../../src/shared/emotes';
-import { OVERLAY_EMOTED, OVERLAY_PINGED } from '../../src/shared/ipc';
+import { OVERLAY_EMOTED, OVERLAY_PINGED, OVERLAY_QUICK_ACTION } from '../../src/shared/ipc';
 import { DEFAULT_SETTINGS, overlaySettings } from '../../src/shared/settings';
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -16,7 +16,7 @@ const h = vi.hoisted(() => {
       x: number;
       bounds: Rect;
       emit: (event: string) => boolean;
-      webContents: { send: ReturnType<typeof vi.fn> };
+      webContents: { send: ReturnType<typeof vi.fn>; mainFrame: object };
       onTop: string[];
       hiddenInMissionControl: boolean;
     }>,
@@ -44,7 +44,7 @@ vi.mock('electron', async () => {
     }
     x: number;
     bounds: Rect;
-    webContents = Object.assign(new Emitter(), { send: vi.fn() });
+    webContents = Object.assign(new Emitter(), { send: vi.fn(), mainFrame: {} });
     constructor(opts: Rect) {
       super();
       this.x = opts.x;
@@ -115,6 +115,63 @@ beforeEach(async () => {
 });
 
 describe('OverlayManager wheels', () => {
+  it('authorizes one matching main-frame action confirmation after a local release', () => {
+    mgr.setQuickActionsEnabled(true);
+    const actions: string[] = [];
+    mgr.on('quickAction', (id: string) => actions.push(id));
+    mgr.handle({ type: 'wheelOpen', x: 100, y: 100, wheel: 'ping' });
+    mgr.handle({ type: 'wheelRelease', x: 300, y: 100, wheel: 'ping' });
+    const release = sent(0).find(([channel]) => channel === 'wheel:release')?.[1] as { quickActionSession: number };
+    expect(typeof release.quickActionSession).toBe('number');
+    const report = h.handlers.get(OVERLAY_QUICK_ACTION);
+    if (!report) throw new Error('missing quick action report handler');
+    const payload = { sessionId: release.quickActionSession, id: 'omw' };
+    report({ sender: h.windows[0].webContents, senderFrame: {} }, payload);
+    report({ sender: {}, senderFrame: h.windows[0].webContents.mainFrame }, payload);
+    expect(actions).toEqual([]);
+    const own = { sender: h.windows[0].webContents, senderFrame: h.windows[0].webContents.mainFrame };
+    report(own, payload);
+    report(own, payload);
+    expect(actions).toEqual(['omw']);
+  });
+
+  it('never authorizes clicks, previews, remote pings or the standard question mark', () => {
+    mgr.setQuickActionsEnabled(true);
+    const actions: string[] = [];
+    mgr.on('quickAction', (id: string) => actions.push(id));
+    mgr.previewPing('omw');
+    mgr.spawnRemote({ id: 'omw', displayId: 1, x: 1, y: 1, tag: { name: 'Peer', color: 0 } });
+    mgr.handle({ type: 'click', x: 100, y: 100, wheel: 'ping' });
+    const report = h.handlers.get(OVERLAY_QUICK_ACTION);
+    if (!report) throw new Error('missing quick action report handler');
+    const own = { sender: h.windows[0].webContents, senderFrame: h.windows[0].webContents.mainFrame };
+    report(own, { sessionId: 1, id: 'omw' });
+    mgr.handle({ type: 'wheelOpen', x: 200, y: 200, wheel: 'ping' });
+    mgr.handle({ type: 'wheelRelease', x: 0, y: 200, wheel: 'ping' });
+    const release = sent(0).findLast(([channel]) => channel === 'wheel:release')?.[1] as { quickActionSession?: number };
+    expect(release.quickActionSession).toBeUndefined();
+    report(own, { sessionId: 2, id: 'missing' });
+    expect(actions).toEqual([]);
+  });
+
+  it('invalidates a released action after config change, cancellation or feature disable', () => {
+    mgr.setQuickActionsEnabled(true);
+    const actions: string[] = [];
+    mgr.on('quickAction', (id: string) => actions.push(id));
+    const report = h.handlers.get(OVERLAY_QUICK_ACTION);
+    if (!report) throw new Error('missing quick action report handler');
+    const own = { sender: h.windows[0].webContents, senderFrame: h.windows[0].webContents.mainFrame };
+    for (const cancel of [() => mgr.updateSettings(overlaySettings(DEFAULT_SETTINGS)),
+      () => mgr.cancelWheel(), () => mgr.setQuickActionsEnabled(false)]) {
+      mgr.handle({ type: 'wheelOpen', x: 100, y: 100, wheel: 'ping' });
+      mgr.handle({ type: 'wheelRelease', x: 300, y: 100, wheel: 'ping' });
+      const release = sent(0).findLast(([channel]) => channel === 'wheel:release')?.[1] as { quickActionSession: number };
+      cancel();
+      report(own, { sessionId: release.quickActionSession, id: 'omw' });
+    }
+    expect(actions).toEqual([]);
+  });
+
   it('forwards the open wheel\'s kind with every move and the release', () => {
     mgr.handle({ type: 'wheelOpen', x: 100, y: 200, wheel: 'emote' });
     mgr.handle({ type: 'wheelMove', x: 110, y: 210, wheel: 'emote' });

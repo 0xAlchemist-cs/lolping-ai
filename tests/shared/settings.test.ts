@@ -566,12 +566,13 @@ describe('update settings', () => {
 });
 
 describe('feature settings', () => {
-  it('loads a 0.5.2 settings file with every upstream feature on, and aiExplain off', () => {
+  it('loads a 0.5.2 settings file with every upstream feature on, and optional fork features off', () => {
     const { features: _features, ...old } = DEFAULT_SETTINGS;
     expect(normalizeSettings(old).features).toEqual(DEFAULT_SETTINGS.features);
-    const { aiExplain, ...rest } = normalizeSettings(old).features;
+    const { aiExplain, quickActions, ...rest } = normalizeSettings(old).features;
     expect(Object.values(rest).every((v) => v)).toBe(true);
     expect(aiExplain).toBe(false); // a new window-opening feature starts off, whatever the old file knew
+    expect(quickActions).toBe(false);
   });
 
   it('keeps a switched-off feature', () => {
@@ -598,9 +599,50 @@ describe('feature settings', () => {
     expect('aiKey' in normalizeSettings({ aiKey: 'sk-leak' })).toBe(false);
   });
 
-  it('falls back to every feature on when features is not an object', () => {
+  it('falls back to feature defaults when features is not an object', () => {
     for (const raw of ['yes', 1, null, [true]]) expect(normalizeSettings({ features: raw }).features).toEqual(DEFAULT_SETTINGS.features);
     expect(normalizeSettings({ features: { rooms: 1 } }).features.rooms).toBe(true);
+  });
+});
+
+describe('quick action settings', () => {
+  it('gives old and broken settings fresh empty action bindings', () => {
+    expect(DEFAULT_SETTINGS.quickActions).toEqual({ version: 1, bindings: {} });
+    const first = normalizeSettings({});
+    const second = normalizeSettings({ quickActions: null });
+    expect(first.quickActions).toEqual({ version: 1, bindings: {} });
+    expect(second.quickActions).toEqual({ version: 1, bindings: {} });
+    expect(first.quickActions).not.toBe(second.quickActions);
+    expect(first.quickActions.bindings).not.toBe(DEFAULT_SETTINGS.quickActions.bindings);
+  });
+
+  it('normalizes stored action bindings through settings loading and trusted mutations', () => {
+    const quickActions = { version: 1 as const, bindings: {
+      danger: { enabled: true, name: '  Docs  ', target: { kind: 'web' as const, url: 'https://EXAMPLE.com' } },
+      missing: { enabled: true, name: 'Forbidden', target: { kind: 'showDesktop' as const } },
+    } };
+    const expected = { version: 1, bindings: {
+      danger: { enabled: true, name: 'Docs', target: { kind: 'web', url: 'https://example.com/' } },
+    } };
+    expect(normalizeSettings({ quickActions }).quickActions).toEqual(expected);
+    expect(mergeSettings(DEFAULT_SETTINGS, { quickActions }).quickActions).toEqual(expected);
+    expect(normalizeSettings({ quickActions: { ...quickActions, version: 2 } }).quickActions)
+      .toEqual({ version: 1, bindings: {} });
+  });
+
+  it('prevents a general renderer patch from creating, replacing or removing app bindings', () => {
+    const current = normalizeSettings({ quickActions: { version: 1, bindings: {
+      danger: { enabled: true, name: 'Editor', target: { kind: 'app', exePath: 'C:\\Apps\\editor.exe' } },
+    } } });
+    for (const quickActions of [undefined, null, { version: 1, bindings: {} }, { version: 1, bindings: {
+      danger: { enabled: true, name: 'Other', target: { kind: 'app', exePath: 'C:\\Apps\\other.exe' } },
+    } }]) {
+      const patch = rendererPatch({ volume: 23, quickActions });
+      expect(patch).toEqual({ volume: 23 });
+      const result = mergeSettings(current, patch);
+      expect(result.quickActions).toEqual(current.quickActions);
+      expect(result.volume).toBe(23);
+    }
   });
 });
 

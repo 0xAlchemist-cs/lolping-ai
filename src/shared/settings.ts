@@ -10,6 +10,7 @@ import { LANGUAGE_PREFS, strings, type Lang, type LanguagePref } from './i18n';
 import { HOTKEY_PRIMARY_MODS, MOD, type Hotkey, vkLabel } from './keys';
 import { DEFAULT_CLICK_PING, DEFAULT_WHEEL, isPingId, type PingId } from './pings';
 import type { Platform } from './platform';
+import { normalizeQuickActions, type QuickActionsSettings } from './quickActions';
 import { isTagColor, isTagRgb, readableTagRgb, type TagRgb } from './roomColors';
 import { parseRoomCode } from './roomCode';
 import { sanitizeName } from './roomProtocol';
@@ -96,6 +97,8 @@ export interface Settings {
   aiModel: string;
   /** Per-answer output budget. The connection probe has its own one-token cap. */
   aiMaxTokens: number;
+  /** Local actions on individual pings; saved programs can change only through dedicated Main mutations. */
+  quickActions: QuickActionsSettings;
 }
 
 /** Per-machine defaults for the room profile: the OS username and a random tag colour. */
@@ -148,6 +151,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiBaseUrl: '',
   aiModel: '',
   aiMaxTokens: DEFAULT_AI_MAX_TOKENS,
+  quickActions: { version: 1, bindings: {} },
 };
 
 export const LIMITS = {
@@ -354,6 +358,7 @@ export function normalizeSettings(raw: unknown, platform: Platform = 'win', iden
     aiBaseUrl: typeof r.aiBaseUrl === 'string' ? r.aiBaseUrl.trim().slice(0, 200) : '',
     aiModel: typeof r.aiModel === 'string' ? r.aiModel.trim().slice(0, 100) : '',
     aiMaxTokens: normalizeAiMaxTokens(r.aiMaxTokens),
+    quickActions: normalizeQuickActions(r.quickActions),
   };
 }
 
@@ -363,12 +368,13 @@ export function mergeSettings(current: Settings, patch: Partial<Settings>, platf
 
 /**
  * A patch from the settings window, before it is merged. Imported emotes are left out: they change only through importing
- * and removing, which check the files behind them. `updateNotifiedVersion` is the update checker's own note (which version
+ * and removing, which check the files behind them. Quick actions likewise use dedicated mutations to verify programs.
+ * `updateNotifiedVersion` is the update checker's own note (which version
  * it already announced), so the window can't set it either. Anything that isn't an object changes nothing.
  */
 export function rendererPatch(raw: unknown): Partial<Settings> {
   if (!isObj(raw)) return {};
-  const { customEmotes: _emotes, updateNotifiedVersion: _notified, ...patch } = raw;
+  const { customEmotes: _emotes, quickActions: _actions, updateNotifiedVersion: _notified, ...patch } = raw;
   return patch as Partial<Settings>;
 }
 

@@ -107,6 +107,7 @@ window.overlay.on('wheel:release', (p) => {
     const def = pingById(chosen.key) ?? fallbackPing;
     ping(def, chosen.x, chosen.y, undefined, settings.keepLastPing);
     window.overlay.reportPing(def.id, chosen.x, chosen.y);
+    if (p.quickActionSession !== undefined) window.overlay.reportQuickAction(p.quickActionSession, def.id);
   }
 });
 window.overlay.on('wheel:cancel', () => {

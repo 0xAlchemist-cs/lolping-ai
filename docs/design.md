@@ -631,3 +631,90 @@ References: [GLM-5.3-Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3
 [Chat Completions](https://docs.bigmodel.cn/api-reference/模型-api/对话补全),
 [streaming](https://docs.bigmodel.cn/cn/guide/capabilities/streaming),
 [provider errors](https://docs.bigmodel.cn/cn/api/api-code).
+
+## 17. Ping icon quick actions (P3, Windows)
+
+`features.quickActions` defaults to false. `quickActions` stores a version-1 map from non-`missing`
+Ping IDs to enabled/name/target bindings. Normalization drops malformed entries independently and always
+removes `missing`; the existing AI switch and report listener retain their behavior. Directions and wheel
+positions are not action keys. Moving an icon preserves its binding, including when temporarily absent.
+
+The Windows-only Fluent settings page selects icons without executing them. Local drafts become effective
+on Save. Test uses only the saved enabled binding and intentionally works with the feature switch off.
+The general settings patch strips protected bindings. Dedicated IPC authenticates the current settings
+window's main frame. A Main-owned file picker grants an expiring, frame-bound, one-use capability; the
+renderer cannot submit a program path. Editing the same binding can retain its existing program target.
+Save and execution recheck the regular local `.exe` and its canonical path, rejecting path redirection.
+
+Main creates a wheel session from the actual input bridge open event and stores origin, display, wheel
+size and icon configuration. At release it computes the expected icon with the same geometry as the
+renderer. The renderer emits the original Ping report first and a separate action confirmation next.
+Only the owning overlay's main frame can consume the matching two-second pending session once. Clicks,
+previews, remote Pings, center cancellation, `missing`, stale sessions and mismatches cannot execute.
+Configuration, display, helper and window lifecycle changes invalidate sessions. Pause, capture, room
+text, lock, suspend and shutdown gate dispatch. Settings changes and shutdown abort pending native jobs.
+No new input gesture, native hook state or input-helper protocol was added.
+
+`QuickActionExecutor` validates saved targets and refuses an in-flight duplicate instead of queuing.
+HTTPS addresses require a host, no credentials/control characters, and a bounded canonical length;
+`shell.openExternal` delegates to the default browser. Programs launch with an empty argument array and
+`shell: false`. An activation denial stops; only `launchRequired` permits a second filesystem check and
+launch. Process creation success means submission, not application readiness. No automatic elevation,
+scripts, shortcuts, arbitrary arguments, webpage fetching or remote icons are supported.
+
+`DesktopBridge` spawns the independent `desktop-helper.exe` only for a job, with bounded request/reply,
+strict status/exit parsing and a three-second timeout. Cancellation kills only its own child. Native
+activation compares full Unicode process paths, chooses the first eligible window in Z order, verifies
+HWND/PID/path again before restore and each foreground attempt, and reports actual foreground success.
+No eligible window returns `launchRequired`; selected but refused/disappeared windows return
+`activationDenied`. The user's revised desktop action is one-way clearing: `IShellDispatch::MinimizeAll`
+minimizes windows without a restore operation or private window state. The wire command is `showDesktop`
+and `desktopShown` means the shell accepted the request. Stored pre-release `toggleDesktop` targets
+migrate to `showDesktop` individually; the old wire command is rejected. Input-helper faults and
+desktop-helper faults have separate lifecycles. The original Ping images remain; no action names or
+automatic website/program images are added to the wheel.
+
+Windows packaging ships the two production helpers and only the production main/preload/renderer
+directories. Fixtures, test executables and local smoke profiles stay outside the package. Other platforms
+keep their existing package and runtime paths; no new desktop helper is required there.
+
+Validation includes shared/Main Vitest tests, the original hook suite, native protocol/window fixtures,
+typecheck, production builds and independent sandbox preload checks. `tools/quick-actions-smoke.cjs`
+exercises the real Fluent UI with controlled IPC. `tools/ping-actions-smoke.cjs` runs production overlay
+and preload code with synthetic input-bridge events, an owned native window and an explicitly reported
+OS-injected Alt tap (omitted with `--no-input`). It strictly observes clearing, a repeated clear without
+restore, then clearing a deliberately reopened test window, and preserves the legacy question-mark
+report. These tests make no physical-mouse, elevated-window or mixed-DPI acceptance claim. Native GUI
+checks expose skipped observations when the session cannot provide foreground or desktop state.
+The smoke's `--dispatch-only` mode measures 100 production-overlay IPC round trips to a stubbed
+native request boundary. It never toggles the desktop and is separate from full-app performance
+and physical input acceptance.
+`tools/ping-actions-hook-smoke.cjs` instead runs the unchanged real input helper and feeds
+its stdout events through InputBridge to the production overlay and preload. A guarded
+driver injects input only at an owned foreground window. It covers the existing keyboard/
+side-button triggers, cancellations, single-click isolation, capture and pause pass-through,
+binding gates and icon rearrangement. URL opening and Main availability are harnessed;
+no physical, full-app-entry-point or actual desktop-effect result is inferred.
+`tools/ping-actions-app-smoke.cjs` loads the complete built Main entry with isolated appData
+and userData. It uses real settings/UI/IPC/store and the input helper, with URL opening,
+program selection and native activation jobs controlled at external boundaries. It covers
+capture, pause, settings changes, window close and shutdown. Repeated capture-state notices
+are ignored: each settings KeyCapture control announces its initial false state, and those
+duplicates must not abort an unrelated action. The test checks an active child's probe
+response before actual cancellation and observes settings persistence and helper exit.
+The overlay/native smoke's `--no-input` option omits the test-only Alt tap for a separate
+caller-context comparison; the current test requires actual one-way minimization effects. Diagnosis
+review and remaining blockers are recorded in `docs/p3-desktop-review.md`.
+The complete-Main smoke's `--latency` mode records 100 guarded OS-injected gestures from real input-helper
+stdout receipt in Main to the controlled `shell.openExternal` boundary. Browser startup,
+physical input and native application/desktop actions are outside that measurement.
+`tools/ping-actions-idle-benchmark.cjs` compares an exported, built baseline with the current
+built Main in ABBA order. Both use isolated offline profiles, the same input-helper binary
+and no settings window. It samples only owned Electron/input processes, excludes intervals
+with changed process identities or recent session input, and reports insufficient idle
+samples as incomplete. Raw snapshots and timing scope are described in
+`docs/p3-performance-verification.md`; these tools never run in the product.
+The desktop fixture's hidden-window command regression runs before native e2e. It checks
+bounded command parsing, NUL/long-line rejection and foreground sampling without showing
+windows, toggling the desktop or injecting input. Unused fixture injection commands were
+removed; strict desktop-effect acceptance remains separate.

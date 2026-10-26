@@ -16,6 +16,9 @@ const api: OverlayApi = {
   reportPing() {
     // the demo has no room to share pings with
   },
+  reportQuickAction() {
+    // Browser demos never execute desktop actions.
+  },
   reportEmote() {
     // nor emotes
   },

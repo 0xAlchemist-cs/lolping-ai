@@ -3,6 +3,9 @@ import type { EmoteArt, EmoteFile, EmoteRef, ImportResult, SoundResult } from '.
 import type { Lang } from './i18n';
 import type { PingId } from './pings';
 import type { Platform } from './platform';
+import type {
+  ActionPingId, QuickActionDraft, QuickActionMutationResult, QuickActionProgramSelection, QuickActionResult,
+} from './quickActions';
 import type { HelperStatus, WheelKind } from './protocol';
 import type { JoinResult, RoomState, RoomStateCore } from './room';
 import type { TagRgb } from './roomColors';
@@ -31,7 +34,7 @@ export interface OverlayEvents {
   /** `wheel` names the wheel the gesture belongs to; missing means 'ping' (the site demo leaves it out). */
   'wheel:open': Point & { wheel?: WheelKind };
   'wheel:move': Point & { wheel?: WheelKind };
-  'wheel:release': Point & { wheel?: WheelKind };
+  'wheel:release': Point & { wheel?: WheelKind; quickActionSession?: number };
   'wheel:cancel': null;
   /** `tag` marks a ping from another room member. `keep`: our own ping that stays until 'ping:unkeep' or our next one. */
   'ping:spawn': Point & { id: PingId; tag?: PingTag; keep?: boolean };
@@ -217,6 +220,8 @@ export const OVERLAY_ASSETS = 'overlay:assets';
 export const OVERLAY_PINGED = 'overlay:pinged';
 /** overlay renderer → main: {ref, x, y} of an emote the wheel just placed, so it can be shared with the room. */
 export const OVERLAY_EMOTED = 'overlay:emoted';
+/** A local wheel confirms the Main-owned release session; no executable target crosses this channel. */
+export const OVERLAY_QUICK_ACTION = 'overlay:quickAction';
 
 export interface AppStatus {
   enabled: boolean;
@@ -261,6 +266,10 @@ export interface SettingsApi {
   onStatus(cb: (s: AppStatus) => void): () => void;
   setEnabled(on: boolean): Promise<void>;
   previewPing(id: PingId): Promise<void>;
+  pickQuickActionProgram(): Promise<QuickActionProgramSelection | null>;
+  saveQuickAction(id: ActionPingId, draft: QuickActionDraft): Promise<QuickActionMutationResult>;
+  removeQuickAction(id: ActionPingId): Promise<QuickActionMutationResult>;
+  testQuickAction(id: ActionPingId): Promise<QuickActionResult>;
   /** Plays the emote in the middle of the primary display, without sharing it. */
   previewEmote(ref: EmoteRef): Promise<void>;
   /** Saves an image prepared by the settings window and adds it to the imported emotes. */

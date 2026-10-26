@@ -59,10 +59,24 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       # Builds hook-helper.exe and runs the C++ tests. The TypeScript tests need the built helper.
+      # The runner's MSVC (14.44) compiles the test macro's conformant preprocessor features and
+      # non-ASCII sources correctly only with these cl flags; sources stay untouched.
       - run: npm run test:helper
+        env:
+          CL: -utf-8 /Zc:preprocessor
+      # Builds desktop-helper.exe, runs its C++ unit tests and the end-to-end checks. GUI fixture
+      # scenarios skip with a visible reason when the runner has no interactive desktop.
+      - run: npm run test:desktop
       - run: npm test
       - run: npm run build
+      # The preload bundle tests skip without a build; rerun them against the fresh production output.
+      - run: npx vitest run tests/main/preloadBundle.test.ts
       - run: npm run build:site
+      - run: node tools/verify-desktop-package-smoke.cjs
+      # Full Windows package (both helpers are built inside dist) plus a resource check on the
+      # unpacked directory.
+      - run: npm run dist
+      - run: node tools/verify-desktop-package.cjs release/win-unpacked/resources
 
   test-mac:
     needs: changes

@@ -18,7 +18,9 @@
     "test": "vitest run",
     "build:helper": "node native/hook-helper/run.mjs build",
     "test:helper": "node native/hook-helper/run.mjs test",
-    "dist": "npm run build:helper && electron-vite build && electron-builder --win --publish never",
+    "build:desktop": "node native/desktop-helper/run.mjs build",
+    "test:desktop": "node native/desktop-helper/run.mjs test",
+    "dist": "npm run build:helper && npm run build:desktop && electron-vite build && electron-builder --win --publish never",
     "dist:mac": "npm run build:helper && electron-vite build && electron-builder --mac --arm64 --publish never",
     "dev:site": "vite --config site/vite.config.ts",
     "build:site": "vite build --config site/vite.config.ts",
@@ -51,11 +53,14 @@
     "appId": "com.lolping.app",
     "productName": "lolPing",
     "directories": { "output": "release", "buildResources": "build" },
-    "files": ["out/**/*", "package.json"],
+    "files": ["out/main/**/*", "out/preload/**/*", "out/renderer/**/*", "package.json"],
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "build/icon.ico",
-      "extraResources": [{ "from": "native/hook-helper/build/hook-helper.exe", "to": "hook-helper.exe" }]
+      "extraResources": [
+        { "from": "native/hook-helper/build/hook-helper.exe", "to": "hook-helper.exe" },
+        { "from": "native/desktop-helper/build/desktop-helper.exe", "to": "desktop-helper.exe" }
+      ]
     },
     "nsis": {
       "oneClick": false,

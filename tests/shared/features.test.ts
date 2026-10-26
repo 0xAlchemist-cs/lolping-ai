@@ -2,16 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_FEATURES, featureOn, liveKeys, normalizeFeatures, roomFeaturesOff } from '../../src/shared/features';
 
 describe('features', () => {
-  it('turns the room and emote features on by default, and aiExplain off', () => {
+  it('turns the room and emote features on by default, and optional fork features off', () => {
     expect(normalizeFeatures(undefined)).toEqual(DEFAULT_FEATURES);
-    const { aiExplain, ...rest } = DEFAULT_FEATURES;
+    const { aiExplain, quickActions, ...rest } = DEFAULT_FEATURES;
     expect(Object.values(rest).every((v) => v)).toBe(true);
     expect(aiExplain).toBe(false);
+    expect(quickActions).toBe(false);
   });
 
   it('keeps aiExplain off in an old settings file, and honours an explicit choice', () => {
     expect(normalizeFeatures({})).toEqual(DEFAULT_FEATURES);
     expect(normalizeFeatures({ aiExplain: true })).toEqual({ ...DEFAULT_FEATURES, aiExplain: true });
+  });
+
+  it('keeps quick actions off for old or malformed settings and honours an explicit choice', () => {
+    for (const quickActions of [undefined, null, 'true', 1, {}]) {
+      expect(normalizeFeatures({ quickActions }).quickActions).toBe(false);
+    }
+    const enabled = normalizeFeatures({ quickActions: true, rooms: false });
+    expect(featureOn({ features: enabled }, 'quickActions')).toBe(true);
+    expect(featureOn({ features: normalizeFeatures({ quickActions: false }) }, 'quickActions')).toBe(false);
+    expect(roomFeaturesOff({ features: enabled })).toEqual(['text', 'votes']);
   });
 
   it('repairs a broken value key by key', () => {

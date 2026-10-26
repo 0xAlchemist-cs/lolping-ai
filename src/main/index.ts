@@ -11,6 +11,7 @@ import { featureOn, liveKeys, roomFeaturesOff } from '../shared/features';
 import { hotkeyLabel } from '../shared/keys';
 import { LOGO_TEXTURE } from '../shared/pings';
 import { configCommand, type HelperStatus } from '../shared/protocol';
+import type { ActionPingId, QuickActionError } from '../shared/quickActions';
 import type { RoomState } from '../shared/room';
 import type { VoteKind } from '../shared/roomProtocol';
 import { formatRoomCode, parseRoomCode } from '../shared/roomCode';
@@ -33,11 +34,15 @@ import { captureVision } from './visionCapture';
 import { withCaptureWindowsHidden } from './captureWindows';
 import { isFile } from './fileState';
 import { InputBridge } from './inputBridge';
+import { DesktopBridge } from './desktopBridge';
+import { QuickActionExecutor } from './quickActionExecutor';
+import { launchQuickActionProgram, verifyQuickActionProgram } from './quickActionProgram';
+import { registerQuickActionsIpc } from './quickActionsIpc';
 import { LanTransport } from './lanTransport';
 import { RELAYS } from './relays';
 import { RelayTransport } from './relayTransport';
 import { OverlayManager, type SharedEmote, type SharedPing } from './overlayManager';
-import { assetPath, buildResourcePath, helperExePath, IS_LINUX, IS_MAC, PLATFORM, settingsDir } from './paths';
+import { assetPath, buildResourcePath, desktopHelperExePath, helperExePath, IS_LINUX, IS_MAC, PLATFORM, settingsDir } from './paths';
 import { deriveRoomKeys } from './roomCrypto';
 import { RoomHistory } from './roomHistory';
 import { PanelWindows } from './panelWindows';
@@ -121,6 +126,8 @@ function start(): void {
   let quitting = false; // read by pushStatus: once true, the tray and overlays are gone
   let capturing = false; // the settings page is listening for a key, so the helper must stay suspended
   let textOpen = false;
+  let screenLocked = false;
+  let sleeping = false;
 
   const overlays = new OverlayManager(
     overlaySettings(settings),
@@ -133,6 +140,46 @@ function start(): void {
   );
   overlays.start();
   const bridge = new InputBridge({ command: helperExePath() });
+  const desktop = new DesktopBridge({ command: desktopHelperExePath() });
+  const quickExecutor = new QuickActionExecutor({
+    platform: PLATFORM, desktop,
+    verifyProgram: verifyQuickActionProgram,
+    launchProgram: launchQuickActionProgram,
+    openUrl: (url) => shell.openExternal(url),
+  });
+  const quickActionsAvailable = (): boolean => PLATFORM === 'win' && enabled && !quitting
+    && !capturing && !textOpen && !screenLocked && !sleeping && bridge.status === 'running'
+    && featureOn(settings, 'quickActions');
+  const syncQuickActions = (): void => {
+    overlays.setQuickActionsEnabled(quickActionsAvailable());
+    quickExecutor.cancelPending();
+  };
+  const quickFailure = (code: QuickActionError): void => {
+    if (!quitting) overlays.toast(text().quickActionFailedTitle, text().quickActionErrors[code]);
+  };
+  const clearProgramSelections = registerQuickActionsIpc({
+    platform: PLATFORM, store, window: settingsWindow,
+    pickProgram: async (owner) => {
+      const result = await dialog.showOpenDialog(owner, { properties: ['openFile'], filters: [{ name: '.exe', extensions: ['exe'] }] });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+    verifyProgram: verifyQuickActionProgram,
+    execute: (binding, allowed) => quickExecutor.execute(binding, () => !quitting && !screenLocked && !sleeping && allowed()),
+    onError: quickFailure,
+  });
+  overlays.on('quickAction', (id: ActionPingId) => {
+    const snapshot = settings;
+    const binding = snapshot.quickActions.bindings[id];
+    if (!quickActionsAvailable() || !binding?.enabled) return;
+    const allowed = (): boolean => quickActionsAvailable() && settings === snapshot;
+    void quickExecutor.execute(binding, allowed).then((result) => {
+      if (!result.ok && result.code !== 'disabled' && allowed()) quickFailure(result.code);
+    });
+  });
+  powerMonitor.on('suspend', () => { sleeping = true; syncQuickActions(); });
+  powerMonitor.on('resume', () => { sleeping = false; syncQuickActions(); });
+  powerMonitor.on('lock-screen', () => { screenLocked = true; syncQuickActions(); });
+  powerMonitor.on('unlock-screen', () => { screenLocked = false; syncQuickActions(); });
 
   // Updates: only in an installed build, or in a development build pointed at a test server with LOLPING_UPDATE_TEST_URL.
   const testUrl = process.env.LOLPING_UPDATE_TEST_URL || undefined;
@@ -539,6 +586,7 @@ function start(): void {
   function setEnabled(on: boolean): void {
     if (on === enabled) return;
     enabled = on;
+    syncQuickActions();
     sendConfig(); // also refreshes the config re-sent after restarts
     if (!on) overlays.dropKeptPings();
     const t = text();
@@ -547,7 +595,10 @@ function start(): void {
     pushStatus();
   }
 
-  const syncSuspended = (): void => bridge.send({ type: 'suspend', on: capturing || textOpen });
+  const syncSuspended = (): void => {
+    bridge.send({ type: 'suspend', on: capturing || textOpen });
+    syncQuickActions();
+  };
   /** A screen point (DIPs) as our own lines and the room see it: its display, the point inside it, and the shared form. */
   const ownSpot = (at: { x: number; y: number }) => {
     const display = screen.getDisplayNearestPoint(at);
@@ -627,6 +678,7 @@ function start(): void {
     else overlays.handle(ev);
   });
   bridge.on('status', (s: HelperStatus) => {
+    syncQuickActions();
     // A helper that is starting or has stopped can no longer send the cancel that dismisses a wheel left on screen.
     if (s !== 'running') overlays.cancelWheel();
     if (s === 'noAccess' && IS_MAC) {
@@ -643,6 +695,7 @@ function start(): void {
   store.on('change', (s: Settings) => {
     const previous = settings;
     settings = s;
+    syncQuickActions();
     sendConfig();
     syncRoomText();
     syncRoomVotes();
@@ -717,6 +770,8 @@ function start(): void {
     about,
     retryHelper: startHelper,
     setCapturing: (on) => {
+      // Each key control announces its initial false state; those repeats must not abort an unrelated action.
+      if (capturing === on) return;
       capturing = on;
       syncSuspended();
     },
@@ -744,6 +799,8 @@ function start(): void {
   });
   // The page can't report that it went away mid-capture (window closed, renderer crashed): release the suspend here.
   onSettingsWindowGone(() => {
+    clearProgramSelections();
+    quickExecutor.cancelPending();
     if (!capturing) return;
     capturing = false;
     syncSuspended();
@@ -773,6 +830,9 @@ function start(): void {
   app.on('before-quit', (event) => {
     if (quitting) return;
     quitting = true;
+    quickExecutor.close();
+    desktop.close();
+    clearProgramSelections();
     event.preventDefault();
     updater?.stop(); // aborts a download and drops a check in flight; an install that is quitting the app is left alone
     room.quit(); // says bye, so the others see "left" instead of waiting for a timeout

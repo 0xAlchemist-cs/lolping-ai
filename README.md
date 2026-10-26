@@ -94,6 +94,30 @@ The wheel, from the top going clockwise: Danger, Push, On My Way, All In, Assist
 
 Settings are saved in `%APPDATA%\lolPing\settings.json` on Windows and `~/Library/Application Support/lolPing/settings.json` on a Mac.
 
+## Quick actions (Windows)
+
+In Settings → Quick actions, select a Ping icon, choose an action and save. Turn on the main
+switch to use it from the existing wheel. Actions are off by default, with no preset bindings.
+Moving an icon to another slice keeps its action. The standard question mark stays reserved for AI.
+Only your own wheel selection runs an action; clicks, previews and room members' Pings do not.
+
+- Open an HTTPS address in your default browser. The browser decides whether to open a new tab.
+- Select an `.exe` with the system picker. lolPing restores and requests the foremost matching
+  ordinary window, or opens the program again when no suitable window exists. Windows can refuse
+  foreground activation; lolPing then reports failure without starting another instance. Tray apps
+  and launchers may open another instance. Select the actual application's executable when possible.
+- Clear the screen by asking Windows to minimize desktop windows. Repeating the action keeps them
+  minimized; it never restores them. A successful request means the shell accepted it.
+
+Edits take effect after Save. “Test saved action” runs the saved, enabled binding even when the main
+switch is off. Removing or disabling a binding keeps the original Ping. Names, URLs and program paths
+stay local and are not sent to rooms. lolPing does not fetch website icons or accept scripts, command
+arguments, shortcuts, files or custom URL protocols. Existing fullscreen input protection still applies.
+
+Automated checks cover settings, source validation and the production wheel with controlled native
+windows. Hardware mouse gestures, elevated targets and mixed-DPI/multiple-monitor behavior still need
+manual acceptance; simulated helper events and OS-injected keys do not establish those results.
+
 ## AI explain (experimental)
 
 This fork adds an AI question window. Turn it on under **Settings → Features**, place an Enemy Missing ping with the wheel, and a small card opens where you type a question and the answer streams in. Everything about the ping itself — the wheel, the art, the sound, room sharing — is unchanged, and the feature is off by default.

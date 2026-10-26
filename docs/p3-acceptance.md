@@ -1,0 +1,154 @@
+# P3 implementation and acceptance checkpoint
+
+Date: 2026-10-26. Baseline: `34f0e070500fbbbabfd24ba75b8c6008ce13f0e6`.
+Worktree: `D:/lolping/lolPing-p3`, branch `feat/p3a-windows-actions`.
+
+P3 code is available for review, with the feature off by default. **P3 is not accepted for
+completion or release.** Physical-input, elevated-target and mixed-DPI checks remain open.
+The user subsequently authorized pushing and merging, then changed desktop clearing to
+one-way minimization. Merge waits for review of that revision and repeatable full-app
+behavior. No release or version change is part of this checkpoint.
+
+## Current one-way clear revision (2026-10-26)
+
+The user reported that wheel/Ping events still worked when the old ToggleDesktop operation
+stopped moving windows. They explicitly chose clearing only, without restoration. The new
+`showDesktop` operation calls documented Shell `MinimizeAll`; it never toggles or restores.
+Old saved `toggleDesktop` targets migrate individually. The original Ping images remain,
+with no names or automatic website/software images added, following the user's final
+correction. The temporary appearance changes were removed before committing.
+
+Fresh checks for this revision: typecheck, 1415 Vitest tests across 87 files, 542 original
+input-helper checks, 103 desktop protocol checks and 15 hidden-fixture checks passed.
+Strict desktop e2e: 37 passed, zero failures, one visible foreground-permission probe skip;
+the denial paths were checked. Actual effects observed: clear minimized an owned window,
+repeating kept it minimized, and clearing after explicitly reopening it minimized it again.
+The production wheel/preload/native smoke with `--no-input` also passed all three selections.
+Those wheel events were synthetic; no physical-mouse result is inferred.
+
+The restored-icon Fluent smoke passed (3 saves, 2 controlled tests, 3 picks, 1 removal),
+and a fresh unpacked Windows package passed resource/archive verification. The user's
+desktop shortcut and running app now point to that local package, using their existing
+settings. Other bindings were retained; the current clear target is `showDesktop`.
+The user then repeated clearing through their real Alt wheel, reopening a window between
+attempts, and explicitly reported that every attempt succeeded. This confirms that local
+scenario; it does not cover the remaining DPI, secure-desktop or other-trigger matrix.
+Earlier toggle failures below are historical evidence, not a test of the new operation.
+
+## Automated evidence run by Codex
+
+Machine: Windows 11 build 26100 x64, Node 22.15.0, local MSVC 14.44. The display smoke
+reported one 2560×1600 display at scale 1.25. This does not cover 100/150/200% or mixed DPI.
+Existing dependencies were reused through the local junction; no lockfile changes.
+
+| Check | Result | Scope |
+| --- | --- | --- |
+| `npm run typecheck` | exit 0 | Strict TypeScript |
+| `npm test -- --reporter=dot` | 1414 passed, 87 files, exit 0 | Includes cancellation, post-await capability expiry, canonical-path regressions and 16 real-file program-boundary cases |
+| `npm run build` | exit 0 | Main, renderer and five independent sandbox preload bundles |
+| `npm run build:site` | exit 0 | Browser demo uses a no-op action shim |
+| `npm run test:helper` with `CL='/utf-8 /Zc:preprocessor'` | 542 passed, exit 0 | Original input helper unchanged; flags address the existing local MSVC source/macro compatibility issue |
+| Earlier `npm run test:desktop` checkpoint | 101 unit checks; 32 e2e passed, 0 failed, 2 skipped; exit 0 | Foreground-success canary and desktop effect unavailable; latest strict failure and integrated-revision scope are recorded below |
+| Integrated native build + protocol units + `tests/fixture_commands.mjs` | `/W4 /WX` build clean; 101 protocol + 15 hidden-window checks passed | Exact bounded parsing, NUL/long-line rejection, removed injection commands and clean quit; no desktop changes or injected input; revised desktop e2e/diag remain unrun |
+| `node tools/vision-smoke.cjs` | PASS | Controlled Windows capture/overlay/AI-card regression; synthetic gestures |
+| `node tools/window-resize-smoke.cjs` | PASS | Owned-window native resize, injected mouse input |
+| `node tools/vision-ai-smoke.cjs` | PASS | Synthetic JPEG/SSE integration |
+| `node tools/ai-diagnostics-smoke.cjs` | PASS | Synthetic AI stream, keyboard and failure cases |
+| `node tools/clipboard-smoke.cjs` | PASS | Controlled clipboard cases; fixture output only |
+| `node tools/settings-input-smoke.cjs` | PASS | Real Fluent controls, controlled settings IPC |
+| `node tools/quick-actions-smoke.cjs` | PASS | Real Fluent controls; 3 saves, 2 synthetic tests, 3 picks, 1 removal; bilingual/platform/stale-draft guards |
+| `node tools/ping-actions-hook-smoke.cjs` | 17 cases passed, exit 0 | Unchanged real input helper → InputBridge → production overlay/preload → executor; OS-injected input, open operation stubbed, Main availability harnessed; 11 releases, 10 wheel Pings, 7 recorded actions; no desktop effects |
+| `node tools/ping-actions-app-smoke.cjs` | 18 scenarios passed, exit 0 | Actual built Main entry, real settings/preload/store/Hook; browser/dialog/native-job boundaries controlled; real capture/pause/close/config cancellation and graceful shutdown; 8 wheel Pings, 6 recorded URLs, 3 canceled children, 0 program launches or HTTP requests |
+| `node tools/ping-actions-idle-benchmark.cjs out/p3-performance/baseline-34f0e070` | ABBA comparison passed; 20 accepted idle intervals per version | Actual baseline/current built Main, identical dependencies/input-helper binary, isolated offline profiles; current mean CPU 1.759% of one core, working-set sum 524.10 MiB, private allocation 357.42 MiB; see `p3-performance-verification.md` for baseline and limits |
+| `node tools/ping-actions-idle-benchmark.cjs --enabled-only` | 10 accepted idle intervals, exit 0 | Enabled with a saved web binding; one input helper, zero desktop-helper launches or external requests |
+| `node tools/ping-actions-app-smoke.cjs --latency` | Two 100-sample runs passed; P95 9.47ms and 8.30ms; maxima 11.26ms and 10.20ms | Full Main, OS-injected guarded gestures; helper stdout receipt to controlled browser-request interface, excluding hardware/hook delivery and actual OS/browser work |
+| `node tools/ping-actions-smoke.cjs --dispatch-only` | 100 samples; P50 3.30ms, P95 10.83ms, max 13.25ms; exit 0 | Production overlay/preload IPC from Main release to executor's native-request boundary; native result stubbed, no desktop effects or physical gesture |
+| `electron-builder --win --x64 --dir --publish never` | exit 0 | Current integrated unpacked Windows build, cached Electron artifact |
+| `electron-builder --win --x64 --publish never` with workspace `ELECTRON_BUILDER_CACHE` | exit 0 | Full NSIS installer rebuilt with the capture-state fix, 171861103 bytes; not installed or published |
+| `node tools/verify-desktop-package.cjs release/win-unpacked/resources` | exit 0 | Both production helpers are regular files; no native fixtures/test artifacts; all 226 actual app.asar entries restricted to production paths |
+| `node tools/verify-desktop-package-smoke.cjs` | 6 fixture cases, exit 0 | Resource-only/valid archive pass; missing helper, leaked smoke profile, leaked fixture and malformed archive fail |
+
+The AI smoke tools use synthetic data or injected local implementations. No paid API was
+called. External HTTP requests were zero in the tools that report that counter.
+The latest Fluent smoke additionally verified every Ping icon loaded and wrote the local
+controlled-component preview to `out/quick-actions-smoke/quick-actions.png`. It is not a
+screenshot of a physical user's full-app session and does not complete human UI acceptance.
+The first full installer attempt failed with `EXDEV` while renaming electron-builder's
+profile-cache extraction directory. Its supported `ELECTRON_BUILDER_CACHE` override under
+`out/builder-cache` resolved the failure. The application/package configuration was not
+weakened; the build cache is excluded from `app.asar` by the production allowlist.
+
+## Historical strict ToggleDesktop observation
+
+`node tools/ping-actions-smoke.cjs` uses production overlay/preload code, Main session
+validation and the real bundled desktop helper. Input-bridge events are synthetic. A
+test-only Alt tap is OS-injected while an owned fixture is foreground; it is never used
+by production code. The test requires actual window minimization and restoration after
+two wheel selections, in addition to successful native replies. It does not downgrade
+missing effects to a pass.
+
+One controlled run observed `minimized → restored → minimized → restored`, two `omw`
+actions, unchanged question-mark reporting and zero external requests. A later rerun
+against the freshly built root helper **failed** at `firstDesktopToggle`: the helper
+returned `desktopToggled`, but the fixture only reported its setup `minimized → restored`
+and did not minimize after the action. The independent native suite, without Electron
+overlays, also accepted two toggle requests while observing no window effect (explicit
+skip). This narrows the reproduction but does not establish the cause or rule out
+overlay interference in other conditions.
+
+The later zcode diagnosis handoff added a strict native effect mode. Codex independently
+rebuilt it with diagnostics disabled: 101 protocol units passed, but e2e ended with
+31 passed, 1 failed and 1 skipped (exit 1). Both toggle replies succeeded, with no fixture
+transition in either ten-second observation window. A production-overlay rerun using
+`--no-input` also failed at firstDesktopToggle despite `desktopToggled`; it injected no
+Alt and did not attempt the second wheel action after the first effect failed.
+The strict gate is useful, while causal/foreground exclusions and diagnostic input guards
+need revision. See `p3-desktop-review.md` for logs and the zcode follow-up. Shell state
+remains a hypothesis, not a complete exclusion of lolPing contributions.
+
+The follow-up diagnostic revision is now integrated locally. Codex removed the unused
+fixture input commands, fixed long-line/NUL parsing after a real failing check, and added
+15 passing hidden-window regressions to the native test entry. The 101 protocol units
+and native build pass. Revised foreground diagnostics remain unrun; these checks do not
+clear the earlier strict desktop failures. See `p3-desktop-diagnosis.md` and the follow-up
+in `p3-desktop-review.md`.
+
+Microsoft documents ToggleDesktop as showing/hiding the desktop under the shell's own
+rules: [IShellDispatch4.ToggleDesktop](https://learn.microsoft.com/en-us/windows/win32/shell/ishelldispatch4-toggledesktop).
+A successful native request alone cannot satisfy the product's window-level acceptance.
+Do not replace the strict assertion with a request-only check, silently retry desktop
+actions, inject production shortcuts or suppress existing features to obtain a pass.
+
+## Acceptance still required
+
+- Confirm repeatable one-way clearing in the full app, including reopened windows,
+  existing AI cards and other overlays. Restoration is no longer a product action.
+- Physical mouse with the existing trigger keys and side buttons; click/pass-through,
+  center/Esc/right-click cancellation, pause and settings key capture. The controlled
+  real-hook checks now pass with OS-injected input; see `p3-input-verification.md` for
+  scope and limits. The complete Main entry is additionally exercised by the isolated
+  full-app harness in `p3-full-app-verification.md`, with external effects controlled.
+- Ordinary, minimized, tray-only and multiple application windows, launchers, denied
+  activation, and UAC/elevated targets. Controlled fixtures cover part of this matrix.
+- 100/150/200% DPI, mixed monitors, cross-screen gestures, monitor removal and display-mode
+  changes; lock/unlock and secure-desktop return.
+- Full-app physical release-to-system-request P95 measurement (target ≤100ms), cold first
+  actions, sustained actions/failures/timeouts and actual native/browser costs. The local
+  same-machine idle baseline and real-hook-to-controlled-browser measurements are recorded
+  in `p3-performance-verification.md`; their short sampling and external-boundary limits
+  do not complete these remaining checks.
+- Installer installation/upgrade smoke and remote Windows/macOS/Linux CI. The local full
+  NSIS build passed; see `p3-packaging-verification.md` for zcode's earlier, narrower report.
+- Human UI review and screenshot, and review of the complete diff before merge.
+
+## Coordination
+
+Codex committed the native handoff and packaging with normal Git, without modifying or
+bypassing zcode's environment gate. External `feat/p3-packaging-ci` commit `0408738` was
+integrated as `00acde7`. Only the native module and the four agreed packaging paths were
+included; `.mimosa` state was excluded. Zcode's follow-up from
+`p3-zcode-diagnosis-review-task.md` was reviewed and integrated with the parser and input
+command cleanup recorded in `p3-desktop-review.md`. Codex completed the paused program-boundary coverage
+locally; see `p3-program-verification.md`. User direction is local fixes first, with no
+new pushes or PR creation. No PR was created; the earlier authorized branch push completed
+before the cancellation, and the remote branch remains at `3f8ea16`.

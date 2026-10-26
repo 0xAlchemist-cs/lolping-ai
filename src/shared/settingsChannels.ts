@@ -37,4 +37,8 @@ export const SETTINGS_CH = {
   aiKeySet: 'ai:keySet',
   aiKeyClear: 'ai:keyClear',
   aiTest: 'ai:test',
+  quickActionPick: 'quickAction:pickProgram',
+  quickActionSave: 'quickAction:save',
+  quickActionRemove: 'quickAction:remove',
+  quickActionTest: 'quickAction:test',
 } as const;
