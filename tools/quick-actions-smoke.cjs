@@ -1,12 +1,13 @@
 /* Actual Fluent controls with synthetic settings and manually released IPC; never launches a program or website. */
 const { join, resolve } = require('node:path');
-const { mkdirSync, writeFileSync } = require('node:fs');
+const { cpSync, mkdirSync, writeFileSync } = require('node:fs');
 const { spawnSync } = require('node:child_process');
 
 if (!process.versions.electron) {
   const root = resolve(__dirname, '..');
   const out = join(root, 'out/quick-actions-smoke');
   mkdirSync(out, { recursive: true });
+  cpSync(join(root, 'out/renderer/textures'), join(root, 'out/textures'), { recursive: true });
   writeFileSync(join(out, 'fixture.tsx'), `import {createRoot} from 'react-dom/client';
 import {FluentProvider,webLightTheme} from '@fluentui/react-components';
 import {QuickActionsSection} from '../../src/renderer/settings/components/QuickActionsSection';
@@ -135,7 +136,10 @@ function run() {
       };
       await open();
       await wait(() => evaluate('!!document.querySelector("[data-quick-action=danger]")'), 'editorMissing');
+      await wait(() => evaluate('[...document.querySelectorAll(".qaOverview img")].every(image=>image.complete&&image.naturalWidth>0)'), 'pingIconsNotLoaded');
       card.show(); card.focus();
+      await paint();
+      writeFileSync(join(out, 'quick-actions.png'), (await card.webContents.capturePage()).toPNG());
       stage = 'draft';
       check(settings.features.quickActions === false, 'globalDefault');
       check(await evaluate('document.querySelectorAll(".qaSlot").length===8&&document.querySelectorAll(".qaTile").length===12'), 'iconSelectionMissing');
@@ -213,7 +217,7 @@ function run() {
       console.log(JSON.stringify({ status: 'PASS', syntheticOnly: true, actualFluentControls: true, saves, tests, picks, removes,
         draftPushProtected: true, lateSaveProtected: true, latePickerTypeProtected: true, latePickerIconProtected: true,
         globalOffTest: true, disabledTestBlocked: true, retainedAppResave: true, defaultNames: true, tokenOnlySave: true,
-        reservedAi: true, keyboardSelection: true, bilingual: true, hiddenOnMacAndLinux: true, externalRequests }));
+        reservedAi: true, keyboardSelection: true, pingIconsLoaded: true, bilingual: true, hiddenOnMacAndLinux: true, externalRequests }));
       app.exit(0);
     } catch (error) {
       console.log(JSON.stringify({ status: 'FAIL', stage, code: error.message, saves, tests, picks, removes, externalRequests }));

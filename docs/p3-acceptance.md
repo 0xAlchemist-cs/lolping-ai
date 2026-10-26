@@ -38,6 +38,9 @@ Existing dependencies were reused through the local junction; no lockfile change
 
 The AI smoke tools use synthetic data or injected local implementations. No paid API was
 called. External HTTP requests were zero in the tools that report that counter.
+The latest Fluent smoke additionally verified every Ping icon loaded and wrote the local
+controlled-component preview to `out/quick-actions-smoke/quick-actions.png`. It is not a
+screenshot of a physical user's full-app session and does not complete human UI acceptance.
 The first full installer attempt failed with `EXDEV` while renaming electron-builder's
 profile-cache extraction directory. Its supported `ELECTRON_BUILDER_CACHE` override under
 `out/builder-cache` resolved the failure. The application/package configuration was not
