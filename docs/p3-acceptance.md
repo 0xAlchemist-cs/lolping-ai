@@ -18,7 +18,7 @@ Existing dependencies were reused through the local junction; no lockfile change
 | Check | Result | Scope |
 | --- | --- | --- |
 | `npm run typecheck` | exit 0 | Strict TypeScript |
-| `npm test -- --reporter=dot` | 1398 passed, 86 files, exit 0 | Includes latest cancellation, post-await capability expiry and canonical-path regressions |
+| `npm test -- --reporter=dot` | 1414 passed, 87 files, exit 0 | Includes cancellation, post-await capability expiry, canonical-path regressions and 16 real-file program-boundary cases |
 | `npm run build` | exit 0 | Main, renderer and five independent sandbox preload bundles |
 | `npm run build:site` | exit 0 | Browser demo uses a no-op action shim |
 | `npm run test:helper` with `CL='/utf-8 /Zc:preprocessor'` | 542 passed, exit 0 | Original input helper unchanged; flags address the existing local MSVC source/macro compatibility issue |
@@ -92,5 +92,8 @@ actions, inject production shortcuts or suppress existing features to obtain a p
 Codex committed the native handoff and packaging with normal Git, without modifying or
 bypassing zcode's environment gate. External `feat/p3-packaging-ci` commit `0408738` was
 integrated as `00acde7`. Only the native module and the four agreed packaging paths were
-included; `.mimosa` state was excluded. The next zcode task is defined in
-`p3-zcode-program-tests-task.md`; its results are not included in the counts above.
+included; `.mimosa` state was excluded. The current zcode priority task is defined in
+`p3-zcode-desktop-diagnosis-task.md`. Codex completed the paused program-boundary coverage
+locally; see `p3-program-verification.md`. User direction is local fixes first, with no
+new pushes or PR creation. No PR was created; the earlier authorized branch push completed
+before the cancellation, and the remote branch remains at `3f8ea16`.
