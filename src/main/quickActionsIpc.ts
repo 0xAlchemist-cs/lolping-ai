@@ -107,6 +107,11 @@ export function registerQuickActionsIpc(d: QuickActionsIpcDeps): () => void {
       const verified = await d.verifyProgram(path);
       if (version !== generation || ownerOf(event) !== owner) return { ok: false, code: 'unauthorized' };
       if (!verified.ok) return verified;
+      if (selectedToken !== undefined) {
+        const permission = selections.get(selectedToken);
+        if (!permission || permission.expires <= now()) return { ok: false, code: 'programSelectionExpired' };
+      }
+      if (verified.exePath !== path) return { ok: false, code: 'invalidProgram' };
       resolved = { kind: 'app', exePath: verified.exePath };
     } else if (target.kind === 'web') {
       const url = normalizeQuickActionUrl(target.url);

@@ -5,7 +5,7 @@ import type { ProgramVerification } from './quickActionProgram';
 
 interface ExecutorOptions {
   platform: Platform;
-  desktop: { run(request: DesktopCommand): Promise<DesktopReply> };
+  desktop: { run(request: DesktopCommand, signal?: AbortSignal): Promise<DesktopReply> };
   verifyProgram(path: string): Promise<ProgramVerification>;
   openUrl(url: string): Promise<void>;
   launchProgram(path: string): Promise<void>;
@@ -14,6 +14,7 @@ interface ExecutorOptions {
 /** Executes saved, validated targets; renderers never supply a process command or execution target here. */
 export class QuickActionExecutor {
   private readonly inFlight = new Set<string>();
+  private readonly controllers = new Set<AbortController>();
   private closed = false;
 
   constructor(private readonly options: ExecutorOptions) {}
@@ -22,13 +23,15 @@ export class QuickActionExecutor {
     if (this.options.platform !== 'win') return { ok: false, code: 'unsupported' };
     const binding = normalizeQuickActionBinding(raw);
     if (!binding) return { ok: false, code: 'invalidBinding' };
-    const allowed = (): boolean => !this.closed && binding.enabled && authorized();
+    const controller = new AbortController();
+    const allowed = (): boolean => !this.closed && !controller.signal.aborted && binding.enabled && authorized();
     if (!allowed()) return { ok: false, code: 'disabled' };
     const target = binding.target;
     const key = target.kind === 'web' ? `web:${target.url}`
       : target.kind === 'app' ? `app:${target.exePath.toLowerCase()}` : 'toggleDesktop';
     if (this.inFlight.has(key)) return { ok: false, code: 'busy' };
     this.inFlight.add(key);
+    this.controllers.add(controller);
     try {
       if (target.kind === 'web') {
         if (!allowed()) return { ok: false, code: 'disabled' };
@@ -39,7 +42,8 @@ export class QuickActionExecutor {
         const verified = await this.options.verifyProgram(target.exePath);
         if (!allowed()) return { ok: false, code: 'disabled' };
         if (!verified.ok) return verified;
-        const reply = await this.options.desktop.run({ type: 'activate', exePath: verified.exePath });
+        if (verified.exePath !== target.exePath) return { ok: false, code: 'invalidProgram' };
+        const reply = await this.options.desktop.run({ type: 'activate', exePath: verified.exePath }, controller.signal);
         if (!allowed()) return { ok: false, code: 'disabled' };
         if (reply.type === 'bridgeError') return { ok: false, code: reply.code };
         if (reply.status === 'activated') return { ok: true, status: 'activated' };
@@ -54,17 +58,25 @@ export class QuickActionExecutor {
         return { ok: true, status: 'launchSubmitted' };
       }
       if (!allowed()) return { ok: false, code: 'disabled' };
-      const reply = await this.options.desktop.run({ type: 'toggleDesktop' });
+      const reply = await this.options.desktop.run({ type: 'toggleDesktop' }, controller.signal);
+      if (!allowed()) return { ok: false, code: 'disabled' };
       if (reply.type === 'bridgeError') return { ok: false, code: reply.code };
       return reply.status === 'desktopToggled' ? { ok: true, status: 'desktopToggled' } : { ok: false, code: 'desktopFailed' };
     } catch {
       return { ok: false, code: target.kind === 'toggleDesktop' ? 'desktopFailed' : 'launchFailed' };
     } finally {
       this.inFlight.delete(key);
+      this.controllers.delete(controller);
     }
   }
 
   close(): void {
     this.closed = true;
+    this.cancelPending();
+  }
+
+  /** Settings, pause, lock and window-close paths stop only our still-running action children. */
+  cancelPending(): void {
+    for (const controller of this.controllers) controller.abort();
   }
 }

@@ -7,6 +7,7 @@ import { registerQuickActionsIpc } from '../../src/main/quickActionsIpc';
 import { SettingsStore } from '../../src/main/settingsStore';
 import { SETTINGS_CH } from '../../src/shared/settingsChannels';
 import type { QuickActionBinding } from '../../src/shared/quickActions';
+import type { ProgramVerification } from '../../src/main/quickActionProgram';
 
 const h = vi.hoisted(() => ({ handlers: new Map<string, (event: unknown, ...args: unknown[]) => unknown>() }));
 vi.mock('electron', () => ({
@@ -23,6 +24,8 @@ let clear: () => void;
 let chosen: string | null;
 let ownerPresent: boolean;
 let executions: QuickActionBinding[];
+let picker: () => Promise<string | null>;
+let verifier: (path: string) => Promise<ProgramVerification>;
 
 const call = async (channel: string, ...args: unknown[]) => invoke(channel, ownEvent(), ...args);
 async function invoke(channel: string, event: unknown, ...args: unknown[]): Promise<unknown> {
@@ -40,11 +43,13 @@ beforeEach(async () => {
   chosen = 'C:\\Apps\\Example.exe';
   ownerPresent = true;
   executions = [];
+  picker = async () => chosen;
+  verifier = async (exePath) => ({ ok: true, exePath });
   clear = registerQuickActionsIpc({
     platform: 'win', store,
     window: () => ownerPresent ? owner as unknown as BrowserWindow : null,
-    pickProgram: async () => chosen,
-    verifyProgram: async (exePath) => ({ ok: true, exePath }),
+    pickProgram: () => picker(),
+    verifyProgram: (path) => verifier(path),
     execute: async (binding, allowed) => {
       if (!allowed()) return { ok: false, code: 'disabled' };
       executions.push(binding);
@@ -136,9 +141,48 @@ describe('quick action IPC', () => {
     expect(store.get().quickActions.bindings).toEqual({});
   });
 
-  it('does not grant a selection if its owner closes while the native picker is open', async () => {
+  it('refuses operations when the settings owner no longer exists', async () => {
     ownerPresent = false;
     expect(await call(SETTINGS_CH.quickActionPick)).toBeNull();
     expect(await call(SETTINGS_CH.quickActionSave, 'danger', {})).toEqual({ ok: false, code: 'unauthorized' });
+  });
+
+  it('discards a picker result that arrives after its settings window has closed', async () => {
+    let finish = (_path: string | null) => undefined as void;
+    picker = () => new Promise<string | null>((resolve) => { finish = resolve; });
+    const pending = call(SETTINGS_CH.quickActionPick);
+    ownerPresent = false;
+    clear();
+    finish('C:\\Apps\\Example.exe');
+    expect(await pending).toBeNull();
+    ownerPresent = true;
+    expect(await call(SETTINGS_CH.quickActionSave, 'danger', {
+      enabled: true, name: 'Stale', target: { kind: 'app', programToken: 'selected-program-token' },
+    })).toEqual({ ok: false, code: 'programSelectionExpired' });
+  });
+
+  it('rejects a picker permission that expires while the file is being verified', async () => {
+    await call(SETTINGS_CH.quickActionPick);
+    let release = (_value: ProgramVerification) => undefined as void;
+    let started = () => undefined as void;
+    const verifying = new Promise<void>((resolve) => { started = resolve; });
+    verifier = () => new Promise<ProgramVerification>((resolve) => { release = resolve; started(); });
+    const pending = call(SETTINGS_CH.quickActionSave, 'danger', {
+      enabled: true, name: 'Expired', target: { kind: 'app', programToken: 'selected-program-token' },
+    });
+    await verifying;
+    now = 600000;
+    release({ ok: true, exePath: 'C:\\Apps\\Example.exe' });
+    expect(await pending).toEqual({ ok: false, code: 'programSelectionExpired' });
+    expect(store.get().quickActions.bindings).toEqual({});
+  });
+
+  it('does not save a selected path that was redirected to another executable', async () => {
+    await call(SETTINGS_CH.quickActionPick);
+    verifier = async () => ({ ok: true, exePath: 'C:\\Other.exe' });
+    expect(await call(SETTINGS_CH.quickActionSave, 'danger', {
+      enabled: true, name: 'Replaced', target: { kind: 'app', programToken: 'selected-program-token' },
+    })).toEqual({ ok: false, code: 'invalidProgram' });
+    expect(store.get().quickActions.bindings).toEqual({});
   });
 });

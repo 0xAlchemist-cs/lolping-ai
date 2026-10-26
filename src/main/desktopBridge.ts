@@ -43,8 +43,8 @@ export class DesktopBridge {
 
   constructor(private readonly options: DesktopBridgeOptions) {}
 
-  run(request: DesktopCommand): Promise<DesktopReply> {
-    if (this.closed) return Promise.resolve({ type: 'bridgeError', code: 'helperUnavailable' });
+  run(request: DesktopCommand, signal?: AbortSignal): Promise<DesktopReply> {
+    if (this.closed || signal?.aborted) return Promise.resolve({ type: 'bridgeError', code: 'helperUnavailable' });
     const input = JSON.stringify(request) + '\n';
     if (Buffer.byteLength(input, 'utf8') > 64 * 1024) {
       return Promise.resolve({ type: 'bridgeError', code: 'helperUnavailable' });
@@ -68,12 +68,14 @@ export class DesktopBridge {
         settled = true;
         clearTimeout(timer);
         this.aborts.delete(abort);
+        signal?.removeEventListener('abort', abort);
         if (kill) child.kill();
         resolve(reply);
       };
       const abort = (): void => finish(unavailable, true);
       const timer = setTimeout(() => finish({ type: 'bridgeError', code: 'helperTimeout' }, true), this.options.timeoutMs ?? 3000);
       this.aborts.add(abort);
+      signal?.addEventListener('abort', abort, { once: true });
       child.on('error', () => finish(unavailable, true));
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (chunk: string) => {

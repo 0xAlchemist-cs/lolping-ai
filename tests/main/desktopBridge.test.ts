@@ -42,4 +42,13 @@ describe('DesktopBridge', () => {
     expect(await pending).toEqual({ type: 'bridgeError', code: 'helperUnavailable' });
     expect(await bridge.run({ type: 'toggleDesktop' })).toEqual({ type: 'bridgeError', code: 'helperUnavailable' });
   });
+
+  it('aborts one child without closing the bridge for later operations', async () => {
+    const bridge = make();
+    const controller = new AbortController();
+    const pending = bridge.run({ type: 'toggleDesktop' }, controller.signal);
+    controller.abort();
+    expect(await pending).toEqual({ type: 'bridgeError', code: 'helperUnavailable' });
+    expect(await bridge.run({ type: 'toggleDesktop' })).toEqual({ type: 'result', status: 'desktopToggled' });
+  });
 });

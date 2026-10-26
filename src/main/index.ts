@@ -150,7 +150,10 @@ function start(): void {
   const quickActionsAvailable = (): boolean => PLATFORM === 'win' && enabled && !quitting
     && !capturing && !textOpen && !screenLocked && !sleeping && bridge.status === 'running'
     && featureOn(settings, 'quickActions');
-  const syncQuickActions = (): void => overlays.setQuickActionsEnabled(quickActionsAvailable());
+  const syncQuickActions = (): void => {
+    overlays.setQuickActionsEnabled(quickActionsAvailable());
+    quickExecutor.cancelPending();
+  };
   const quickFailure = (code: QuickActionError): void => {
     if (!quitting) overlays.toast(text().quickActionFailedTitle, text().quickActionErrors[code]);
   };
@@ -161,7 +164,7 @@ function start(): void {
       return result.canceled ? null : result.filePaths[0] ?? null;
     },
     verifyProgram: verifyQuickActionProgram,
-    execute: (binding, allowed) => quickExecutor.execute(binding, allowed),
+    execute: (binding, allowed) => quickExecutor.execute(binding, () => !quitting && !screenLocked && !sleeping && allowed()),
     onError: quickFailure,
   });
   overlays.on('quickAction', (id: ActionPingId) => {
@@ -795,6 +798,7 @@ function start(): void {
   // The page can't report that it went away mid-capture (window closed, renderer crashed): release the suspend here.
   onSettingsWindowGone(() => {
     clearProgramSelections();
+    quickExecutor.cancelPending();
     if (!capturing) return;
     capturing = false;
     syncSuspended();

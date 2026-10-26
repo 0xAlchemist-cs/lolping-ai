@@ -74,4 +74,38 @@ describe('QuickActionExecutor', () => {
       .toEqual({ ok: true, status: 'desktopToggled' });
     expect(effects).toEqual(['toggleDesktop']);
   });
+
+  it('cancels native work on configuration changes without launching a stale program', async () => {
+    const effects: string[] = [];
+    let started = () => undefined as void;
+    const nativeStarted = new Promise<void>((resolve) => { started = resolve; });
+    const executor = new QuickActionExecutor({
+      platform: 'win', verifyProgram: async (exePath) => ({ ok: true, exePath }),
+      desktop: { run: async (_request, signal) => {
+        effects.push('native');
+        started();
+        return new Promise((resolve) => signal?.addEventListener('abort', () =>
+          resolve({ type: 'bridgeError', code: 'helperUnavailable' }), { once: true }));
+      } },
+      openUrl: async () => { effects.push('web'); },
+      launchProgram: async () => { effects.push('launch'); },
+    });
+    const pending = executor.execute(app);
+    await nativeStarted;
+    executor.cancelPending();
+    expect(await pending).toEqual({ ok: false, code: 'disabled' });
+    expect(effects).toEqual(['native']);
+    expect(await executor.execute(web)).toEqual({ ok: true, status: 'opened' });
+  });
+
+  it('rejects a saved path that now resolves to a different executable', async () => {
+    const effects: string[] = [];
+    const executor = new QuickActionExecutor({
+      platform: 'win', verifyProgram: async () => ({ ok: true, exePath: 'C:\\Other.exe' }),
+      desktop: { run: async () => { effects.push('native'); return { type: 'result', status: 'activated' }; } },
+      openUrl: async () => undefined, launchProgram: async () => { effects.push('launch'); },
+    });
+    expect(await executor.execute(app)).toEqual({ ok: false, code: 'invalidProgram' });
+    expect(effects).toEqual([]);
+  });
 });
