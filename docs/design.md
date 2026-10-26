@@ -690,3 +690,10 @@ driver injects input only at an owned foreground window. It covers the existing 
 side-button triggers, cancellations, single-click isolation, capture and pause pass-through,
 binding gates and icon rearrangement. URL opening and Main availability are harnessed;
 no physical, full-app-entry-point or actual desktop-effect result is inferred.
+`tools/ping-actions-app-smoke.cjs` loads the complete built Main entry with isolated appData
+and userData. It uses real settings/UI/IPC/store and the input helper, with URL opening,
+program selection and native activation jobs controlled at external boundaries. It covers
+capture, pause, settings changes, window close and shutdown. Repeated capture-state notices
+are ignored: each settings KeyCapture control announces its initial false state, and those
+duplicates must not abort an unrelated action. The test checks an active child's probe
+response before actual cancellation and observes settings persistence and helper exit.

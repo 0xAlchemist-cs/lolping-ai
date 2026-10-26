@@ -22,9 +22,13 @@ the fixture and resets the pointer-event baseline before testing pass-through, s
 activation click cannot make a broken gesture check pass. Before the trigger gesture it
 checks actual foreground and ownership again. Already-held modifiers/buttons, covered
 surfaces and lost foreground cause failure rather than input to another application.
-Bounded ready/start, armed/press and held/release handshakes avoid timing sleeps and
+Bounded ready/start, armed/press, held/release and released/restore handshakes avoid timing sleeps and
 release input if the parent stops responding. The driver restores the pointer and the
 harness stops only its own helper and windows. It never changes global foreground policy.
+Pointer restoration waits for an actual helper release/cancel or a passed-through mouse-up.
+The input sink has no menu and prevents its own browser selection/drag defaults; only actual
+mouse events increment the counters. It shares `ping-actions-input-client.cjs` with the
+separate full-app smoke, without sharing any production preload runtime module.
 
 The observed display was 2560×1600 at 125%. Results do not cover other DPI values.
 
@@ -45,8 +49,8 @@ All 17 controlled cases passed (exit 0):
 
 Counts: 11 real helper wheel releases, 10 original wheel Pings, 11 original shared Pings
 (including the click Ping), 7 recorded action submissions, 0 external HTTP requests.
-Both final normal-output and diagnostic runs passed all 17 cases and reported 0 setup
-activation clicks. The driver waits at most
+The latest final run passed all 17 cases and reported 1 separately counted setup activation
+click, excluded from pass-through assertions. Earlier successful runs needed none. The driver waits at most
 one second for pre-existing button/modifier state to clear naturally; it never forces
 those keys up. The fixed C# driver is compiled once into a source-hashed DLL under the
 ignored smoke output directory and reused by subsequent driver processes. Changing the
@@ -77,12 +81,18 @@ cases again. The earlier timeouts and denied attempts are not hardware/input acc
 One faster cached-driver attempt stopped with `userInputHeld` before the next trigger;
 the bounded state-clear wait above subsequently completed all 17 cases without forcing
 any input release. Failed guarded attempts were never treated as a successful matrix.
+During the full-entry-point work, one final attempt selected an unexpected icon and a
+release-acknowledgement attempt stalled on the fixture's browser drag behavior. Those runs
+failed. The inert sink and explicit release-before-restore handshake above then passed both
+the complete 17-case hook matrix and 18-case full-app matrix. Hardware acceptance is still open.
 
 ## Remaining limits
 
 This verifies the real hook/core overlay integration with **OS-injected input**, not a
 physical mouse. It does not boot the complete `src/main/index.ts` app entry point or prove
-all of its lifecycle wiring. Foreground activation, actual desktop restoration, UAC,
+all of its lifecycle wiring. The separate `p3-full-app-verification.md` checkpoint now
+covers that complete entry point with controlled external effects. Foreground activation,
+actual desktop restoration, UAC,
 lock screen, multi-monitor/mixed DPI, successful browser/process startup, complete
 CPU/memory/performance acceptance and installer upgrade remain separate checks. Existing
 AI question-mark reporting is preserved, but no real model was called.

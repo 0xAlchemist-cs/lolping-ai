@@ -31,9 +31,10 @@ Existing dependencies were reused through the local junction; no lockfile change
 | `node tools/settings-input-smoke.cjs` | PASS | Real Fluent controls, controlled settings IPC |
 | `node tools/quick-actions-smoke.cjs` | PASS | Real Fluent controls; 3 saves, 2 synthetic tests, 3 picks, 1 removal; bilingual/platform/stale-draft guards |
 | `node tools/ping-actions-hook-smoke.cjs` | 17 cases passed, exit 0 | Unchanged real input helper → InputBridge → production overlay/preload → executor; OS-injected input, open operation stubbed, Main availability harnessed; 11 releases, 10 wheel Pings, 7 recorded actions; no desktop effects |
+| `node tools/ping-actions-app-smoke.cjs` | 18 scenarios passed, exit 0 | Actual built Main entry, real settings/preload/store/Hook; browser/dialog/native-job boundaries controlled; real capture/pause/close/config cancellation and graceful shutdown; 8 wheel Pings, 6 recorded URLs, 3 canceled children, 0 program launches or HTTP requests |
 | `node tools/ping-actions-smoke.cjs --dispatch-only` | 100 samples; P50 3.30ms, P95 10.83ms, max 13.25ms; exit 0 | Production overlay/preload IPC from Main release to executor's native-request boundary; native result stubbed, no desktop effects or physical gesture |
 | `electron-builder --win --x64 --dir --publish never` | exit 0 | Current integrated unpacked Windows build, cached Electron artifact |
-| `electron-builder --win --x64 --publish never` with workspace `ELECTRON_BUILDER_CACHE` | exit 0 | Full NSIS installer, 171859906 bytes; downloaded standard NSIS/7zip resources; not installed or published |
+| `electron-builder --win --x64 --publish never` with workspace `ELECTRON_BUILDER_CACHE` | exit 0 | Full NSIS installer rebuilt with the capture-state fix, 171861103 bytes; not installed or published |
 | `node tools/verify-desktop-package.cjs release/win-unpacked/resources` | exit 0 | Both production helpers are regular files; no native fixtures/test artifacts; all 226 actual app.asar entries restricted to production paths |
 | `node tools/verify-desktop-package-smoke.cjs` | 6 fixture cases, exit 0 | Resource-only/valid archive pass; missing helper, leaked smoke profile, leaked fixture and malformed archive fail |
 
@@ -78,7 +79,8 @@ actions, inject production shortcuts or suppress existing features to obtain a p
 - Physical mouse with the existing trigger keys and side buttons; click/pass-through,
   center/Esc/right-click cancellation, pause and settings key capture. The controlled
   real-hook checks now pass with OS-injected input; see `p3-input-verification.md` for
-  scope and limits, including the unexercised complete Main entry point.
+  scope and limits. The complete Main entry is additionally exercised by the isolated
+  full-app harness in `p3-full-app-verification.md`, with external effects controlled.
 - Ordinary, minimized, tray-only and multiple application windows, launchers, denied
   activation, and UAC/elevated targets. Controlled fixtures cover part of this matrix.
 - 100/150/200% DPI, mixed monitors, cross-screen gestures, monitor removal and display-mode

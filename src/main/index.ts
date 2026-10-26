@@ -770,6 +770,8 @@ function start(): void {
     about,
     retryHelper: startHelper,
     setCapturing: (on) => {
+      // Each key control announces its initial false state; those repeats must not abort an unrelated action.
+      if (capturing === on) return;
       capturing = on;
       syncSuspended();
     },
