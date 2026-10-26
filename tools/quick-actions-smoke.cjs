@@ -56,7 +56,7 @@ function run() {
   let settings = { ...DEFAULT_SETTINGS, language: 'en', quickActions: { version: 1, bindings: {
     danger: { enabled: true, name: 'Saved website', target: { kind: 'web', url: 'https://saved.invalid' } },
     push: { enabled: true, name: 'Saved app', target: { kind: 'app', exePath: 'C:\\fixture\\saved.exe' } },
-    assist: { enabled: false, name: 'Disabled', target: { kind: 'toggleDesktop' } },
+    assist: { enabled: false, name: 'Disabled', target: { kind: 'showDesktop' } },
   } } };
   let card;
   let externalRequests = 0;

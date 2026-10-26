@@ -619,7 +619,7 @@ describe('quick action settings', () => {
   it('normalizes stored action bindings through settings loading and trusted mutations', () => {
     const quickActions = { version: 1 as const, bindings: {
       danger: { enabled: true, name: '  Docs  ', target: { kind: 'web' as const, url: 'https://EXAMPLE.com' } },
-      missing: { enabled: true, name: 'Forbidden', target: { kind: 'toggleDesktop' as const } },
+      missing: { enabled: true, name: 'Forbidden', target: { kind: 'showDesktop' as const } },
     } };
     const expected = { version: 1, bindings: {
       danger: { enabled: true, name: 'Docs', target: { kind: 'web', url: 'https://example.com/' } },

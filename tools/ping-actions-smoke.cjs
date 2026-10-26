@@ -1,4 +1,4 @@
-/* Production overlay/preload + Main session checks + real native desktop toggles.
+/* Production overlay/preload + Main session checks + real one-way native desktop clearing.
  * Helper events are synthetic: this does not claim hardware mouse or live-hook acceptance. */
 const { join, resolve } = require('node:path');
 const { mkdirSync, copyFileSync } = require('node:fs');
@@ -94,7 +94,7 @@ function run() {
         platform: 'win', desktop: { run: request => {
           if (!dispatchOnly) return desktop.run(request);
           dispatchMs.push(performance.now() - releasedAt);
-          return Promise.resolve({ type: 'result', status: 'desktopToggled' });
+          return Promise.resolve({ type: 'result', status: 'desktopShown' });
         } },
         verifyProgram: async () => ({ ok: false, code: 'invalidProgram' }),
         launchProgram: async () => { throw new Error('unexpectedLaunch'); },
@@ -102,7 +102,7 @@ function run() {
       });
       manager.on('wheelPing', ping => legacy.push(ping.id));
       manager.on('quickAction', id => {
-        void executor.execute({ enabled: true, name: 'Desktop', target: { kind: 'toggleDesktop' } })
+        void executor.execute({ enabled: true, name: 'Desktop', target: { kind: 'showDesktop' } })
           .then(result => results.push({ id, ...result }));
       });
       await wait(() => Promise.all(BrowserWindow.getAllWindows().filter(window => window !== controller).map(window =>
@@ -184,22 +184,29 @@ function run() {
         manager.handle({ type: 'wheelMove', wheel: 'ping', x: start.x + dx, y: start.y + dy });
         manager.handle({ type: 'wheelRelease', wheel: 'ping', x: start.x + dx, y: start.y + dy });
       };
-      stage = 'firstDesktopToggle';
+      stage = 'firstDesktopClear';
       await gesture(distance, 0);
       await wait(() => results.length === 1, 'firstActionMissing');
-      check(results[0].ok && results[0].status === 'desktopToggled' && results[0].id === 'omw', 'firstToggleFailed');
+      check(results[0].ok && results[0].status === 'desktopShown' && results[0].id === 'omw', 'firstToggleFailed');
       await wait(() => fixtureMinimized, 'fixtureDidNotMinimize');
-      stage = 'secondDesktopToggle';
+      stage = 'secondDesktopClear';
       await gesture(distance, 0);
       await wait(() => results.length === 2, 'secondActionMissing');
-      check(results[1].ok && results[1].status === 'desktopToggled', 'secondToggleFailed');
-      await wait(() => !fixtureMinimized, 'wheelInterruptedDesktopRestore');
-      check(legacy.filter(id => id === 'omw').length === 2, 'legacyPingChanged');
+      check(results[1].ok && results[1].status === 'desktopShown', 'secondToggleFailed');
+      check(fixtureMinimized, 'repeatedClearRestoredWindow');
+      stage = 'clearReopenedWindow';
+      await desktop.run({ type: 'activate', exePath: join(out, 'fixture_app.exe') });
+      await wait(() => !fixtureMinimized, 'controlledWindowDidNotRestore');
+      await gesture(distance, 0);
+      await wait(() => results.length === 3, 'thirdActionMissing');
+      check(results[2].ok && results[2].status === 'desktopShown', 'thirdClearFailed');
+      await wait(() => fixtureMinimized, 'reopenedWindowDidNotMinimize');
+      check(legacy.filter(id => id === 'omw').length === 3, 'legacyPingChanged');
       stage = 'reservedQuestionMark';
       await gesture(-distance, 0);
       await wait(() => legacy.includes('missing'), 'questionMarkLegacyEventLost');
       await paint();
-      check(results.length === 2, 'questionMarkExecutedAction');
+      check(results.length === 3, 'questionMarkExecutedAction');
       check(externalRequests === 0, 'unexpectedNetwork');
       console.log(JSON.stringify({ status: 'PASS', productionWheel: true, productionSandboxPreload: true,
         syntheticHelperEvents: true, osInjectedAlt, hardwareMouseVerified: false, nativeDesktop: true,
@@ -210,8 +217,8 @@ function run() {
       console.log(JSON.stringify({ status: 'FAIL', stage, code: error.message, osInjectedAlt,
         results, fixtureTransitions, fixtureEvents, activationReplies, externalRequests }));
     } finally {
-      // Restore a minimized test fixture if a failed scenario left the system showing the desktop.
-      if (fixtureMinimized) await desktop.run({ type: 'toggleDesktop' });
+      // Only our owned test window is eligible for cleanup activation.
+      if (fixtureMinimized) await desktop.run({ type: 'activate', exePath: join(out, 'fixture_app.exe') });
       if (fixture) fixture.kill();
       if (manager) manager.destroy();
       if (controller && !controller.isDestroyed()) controller.destroy();

@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 
-export type DesktopCommand = { type: 'activate'; exePath: string } | { type: 'toggleDesktop' };
+export type DesktopCommand = { type: 'activate'; exePath: string } | { type: 'showDesktop' };
 export type DesktopReply =
-  | { type: 'result'; status: 'activated' | 'launchRequired' | 'activationDenied' | 'desktopToggled' }
+  | { type: 'result'; status: 'activated' | 'launchRequired' | 'activationDenied' | 'desktopShown' }
   | { type: 'result'; status: 'error'; code: 'invalidRequest' | 'invalidPath' | 'osError'; win32?: number }
   | { type: 'bridgeError'; code: 'helperUnavailable' | 'helperTimeout' };
 
@@ -19,7 +19,7 @@ function parseReply(text: string, exitCode: number | null): DesktopReply | null 
     const o = raw as Record<string, unknown>;
     if (o.type !== 'result') return null;
     switch (o.status) {
-      case 'activated': case 'launchRequired': case 'activationDenied': case 'desktopToggled':
+      case 'activated': case 'launchRequired': case 'activationDenied': case 'desktopShown':
         return exitCode === 0 ? { type: 'result', status: o.status } : null;
       case 'error': {
         if (exitCode !== 1 || !['invalidRequest', 'invalidPath', 'osError'].includes(String(o.code))) return null;

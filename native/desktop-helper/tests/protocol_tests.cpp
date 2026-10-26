@@ -49,18 +49,24 @@ bool rejected(const std::string& line, ErrorCode expected) {
 }  // namespace
 
 int main() {
+  {
+    Request r{};
+    ErrorCode code = ErrorCode::OsError;
+    CHECK(parseRequest(R"({"type":"showDesktop"})", r, code));
+    CHECK(rejected(R"({"type":"showDesktop","exePath":"C:\\app.exe"})", ErrorCode::InvalidRequest));
+  }
   // accepted requests
   {
-    const Request r = parseOk(R"({"type":"toggleDesktop"})");
-    CHECK(r.kind == Request::Kind::ToggleDesktop);
+    const Request r = parseOk(R"({"type":"showDesktop"})");
+    CHECK(r.kind == Request::Kind::ShowDesktop);
   }
   {
-    const Request r = parseOk(R"(  {"type":"toggleDesktop"}  )");  // surrounding whitespace is fine
-    CHECK(r.kind == Request::Kind::ToggleDesktop);
+    const Request r = parseOk(R"(  {"type":"showDesktop"}  )");  // surrounding whitespace is fine
+    CHECK(r.kind == Request::Kind::ShowDesktop);
   }
   {
-    const std::string cr = std::string(R"({"type":"toggleDesktop"})") + '\r';  // CRLF line ending
-    CHECK(parseOk(cr).kind == Request::Kind::ToggleDesktop);
+    const std::string cr = std::string(R"({"type":"showDesktop"})") + '\r';  // CRLF line ending
+    CHECK(parseOk(cr).kind == Request::Kind::ShowDesktop);
   }
   {
     const Request r = parseOk(R"({"type":"activate","exePath":"C:\\Program Files\\Example\\Example.exe"})");
@@ -108,7 +114,7 @@ int main() {
   // malformed requests -> invalidRequest
   CHECK(rejected("", ErrorCode::InvalidRequest));                                                     // truncated/empty
   CHECK(rejected("not json", ErrorCode::InvalidRequest));
-  CHECK(rejected(R"({"type":"toggleDesktop")", ErrorCode::InvalidRequest));                           // truncated
+  CHECK(rejected(R"({"type":"showDesktop")", ErrorCode::InvalidRequest));                           // truncated
   CHECK(rejected(R"({})", ErrorCode::InvalidRequest));                                                // no type
   CHECK(rejected(R"({"type":"activate"})", ErrorCode::InvalidRequest));                               // no exePath
   CHECK(rejected(R"({"exePath":"C:\\a.exe"})", ErrorCode::InvalidRequest));                           // no type
@@ -118,15 +124,15 @@ int main() {
   CHECK(rejected(R"({"type":true})", ErrorCode::InvalidRequest));
   CHECK(rejected(R"({"type":null})", ErrorCode::InvalidRequest));
   CHECK(rejected(R"({"type":{"a":"b"}})", ErrorCode::InvalidRequest));                                // nested object
-  CHECK(rejected(R"({"type":["toggleDesktop"]})", ErrorCode::InvalidRequest));                        // nested array
+  CHECK(rejected(R"({"type":["showDesktop"]})", ErrorCode::InvalidRequest));                        // nested array
   CHECK(rejected(R"({"exePath":{"path":"C:\\a.exe"},"type":"activate"})", ErrorCode::InvalidRequest));
-  CHECK(rejected(R"({"type":"toggleDesktop","type":"toggleDesktop"})", ErrorCode::InvalidRequest));   // duplicate key
-  CHECK(rejected(R"({"type":"toggleDesktop","exePath":"C:\\a.exe"})", ErrorCode::InvalidRequest));    // extra field
+  CHECK(rejected(R"({"type":"showDesktop","type":"showDesktop"})", ErrorCode::InvalidRequest));   // duplicate key
+  CHECK(rejected(R"({"type":"showDesktop","exePath":"C:\\a.exe"})", ErrorCode::InvalidRequest));    // extra field
   CHECK(rejected(R"({"type":"activate","exePath":"C:\\a.exe","extra":"x"})", ErrorCode::InvalidRequest));
-  CHECK(rejected(R"({"type":"toggleDesktop"}x)", ErrorCode::InvalidRequest));                         // trailing garbage
-  CHECK(parseOk(R"({"type":"toggleDesktop"} )").kind == Request::Kind::ToggleDesktop);            // trailing space is whitespace
-  CHECK(rejected(R"({"type":"toggleDesktop"}{"type":"toggleDesktop"})", ErrorCode::InvalidRequest));  // two objects
-  CHECK(rejected("{type:\"toggleDesktop\"}", ErrorCode::InvalidRequest));                             // unquoted key
+  CHECK(rejected(R"({"type":"showDesktop"}x)", ErrorCode::InvalidRequest));                         // trailing garbage
+  CHECK(parseOk(R"({"type":"showDesktop"} )").kind == Request::Kind::ShowDesktop);            // trailing space is whitespace
+  CHECK(rejected(R"({"type":"showDesktop"}{"type":"showDesktop"})", ErrorCode::InvalidRequest));  // two objects
+  CHECK(rejected("{type:\"showDesktop\"}", ErrorCode::InvalidRequest));                             // unquoted key
   // Inputs kept out of CHECK: stringifying a raw literal turns \q / \ud800 into invalid
   // escapes inside the macro's normal-string message.
   {
@@ -139,9 +145,9 @@ int main() {
   }
   CHECK(rejected(std::string("{\"type\":\"a\tb\"}"), ErrorCode::InvalidRequest));                     // raw control char in string
   CHECK(rejected(std::string("{\"type\":\"a\nb\"}"), ErrorCode::InvalidRequest));
-  CHECK(rejected(R"({"type":"toggleDesktop",})", ErrorCode::InvalidRequest));                         // trailing comma
-  CHECK(rejected(R"({"type" "toggleDesktop"})", ErrorCode::InvalidRequest));                           // missing colon
-  CHECK(rejected(R"({"type":"toggleDesktop" "x":"y"})", ErrorCode::InvalidRequest));                   // missing comma
+  CHECK(rejected(R"({"type":"showDesktop",})", ErrorCode::InvalidRequest));                         // trailing comma
+  CHECK(rejected(R"({"type" "showDesktop"})", ErrorCode::InvalidRequest));                           // missing colon
+  CHECK(rejected(R"({"type":"showDesktop" "x":"y"})", ErrorCode::InvalidRequest));                   // missing comma
   CHECK(rejected("[1]", ErrorCode::InvalidRequest));                                                   // not an object
   CHECK(rejected("\"x\"", ErrorCode::InvalidRequest));
   // invalid UTF-8 in the raw line: 0xFF is never a valid UTF-8 byte
@@ -188,7 +194,7 @@ int main() {
   CHECK(serializeResult("activated") == R"({"type":"result","status":"activated"})");
   CHECK(serializeResult("launchRequired") == R"({"type":"result","status":"launchRequired"})");
   CHECK(serializeResult("activationDenied") == R"({"type":"result","status":"activationDenied"})");
-  CHECK(serializeResult("desktopToggled") == R"({"type":"result","status":"desktopToggled"})");
+  CHECK(serializeResult("desktopShown") == R"({"type":"result","status":"desktopShown"})");
   CHECK(serializeError(ErrorCode::InvalidRequest) == R"({"type":"result","status":"error","code":"invalidRequest"})");
   CHECK(serializeError(ErrorCode::InvalidPath) == R"({"type":"result","status":"error","code":"invalidPath"})");
   CHECK(serializeError(ErrorCode::OsError) == R"({"type":"result","status":"error","code":"osError"})");

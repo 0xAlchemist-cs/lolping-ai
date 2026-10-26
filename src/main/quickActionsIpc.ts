@@ -117,7 +117,7 @@ export function registerQuickActionsIpc(d: QuickActionsIpcDeps): () => void {
       const url = normalizeQuickActionUrl(target.url);
       if (url === null) return { ok: false, code: 'invalidUrl' };
       resolved = { kind: 'web', url };
-    } else if (target.kind === 'toggleDesktop') resolved = { kind: 'toggleDesktop' };
+    } else if (target.kind === 'showDesktop') resolved = { kind: 'showDesktop' };
     else return { ok: false, code: 'invalidBinding' };
     const binding = normalizeQuickActionBinding({ enabled: raw.enabled, name: raw.name, target: resolved });
     if (!binding) return { ok: false, code: 'invalidBinding' };

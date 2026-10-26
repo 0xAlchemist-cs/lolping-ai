@@ -13,7 +13,7 @@ else {
       process.exitCode = 1;
     } else {
       const request = JSON.parse(line);
-      const status = request.type === 'activate' ? 'launchRequired' : 'desktopToggled';
+      const status = request.type === 'activate' ? 'launchRequired' : 'desktopShown';
       process.stdout.write(JSON.stringify({ type: 'result', status }) + '\n');
     }
   });

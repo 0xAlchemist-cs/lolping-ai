@@ -18,7 +18,7 @@ constexpr CLSID kClsidShell = {
 
 }  // namespace
 
-int runToggleDesktop(std::string& out) {
+int runShowDesktop(std::string& out) {
   HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
   if (FAILED(hr)) {
     out = dhp::serializeError(dhp::ErrorCode::OsError, static_cast<long long>(static_cast<unsigned long>(hr)));
@@ -28,7 +28,7 @@ int runToggleDesktop(std::string& out) {
   hr = CoCreateInstance(kClsidShell, nullptr, CLSCTX_INPROC_SERVER, __uuidof(IShellDispatch4),
                         reinterpret_cast<void**>(&shell));
   if (SUCCEEDED(hr)) {
-    hr = shell->ToggleDesktop();
+    hr = shell->MinimizeAll();
     shell->Release();
   }
   CoUninitialize();  // balances CoInitializeEx for both S_OK and S_FALSE
@@ -36,6 +36,6 @@ int runToggleDesktop(std::string& out) {
     out = dhp::serializeError(dhp::ErrorCode::OsError, static_cast<long long>(static_cast<unsigned long>(hr)));
     return 1;
   }
-  out = dhp::serializeResult("desktopToggled");
+  out = dhp::serializeResult("desktopShown");
   return 0;
 }

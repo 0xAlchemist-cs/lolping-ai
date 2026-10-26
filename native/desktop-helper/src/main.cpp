@@ -65,7 +65,7 @@ int wmain() {
       } else if (req.kind == dhp::Request::Kind::Activate) {
         exitCode = runActivate(req.exePathUtf8, result);
       } else {
-        exitCode = runToggleDesktop(result);
+        exitCode = runShowDesktop(result);
       }
       break;
     }

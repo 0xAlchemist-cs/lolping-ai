@@ -2,6 +2,10 @@
 
 Status: interface agreed; native implementation assigned to zcode. No Windows acceptance result is implied.
 
+Revision 2026-10-26: the user requested one-way clearing with no restore action. The current
+`showDesktop` / `desktopShown` contract below supersedes the earlier toggle contract. Original
+Ping images remain. Earlier ToggleDesktop diagnosis records describe the previous behavior.
+
 ## Workspace and ownership
 
 - Reviewed product baseline: `34f0e070500fbbbabfd24ba75b8c6008ce13f0e6`.
@@ -48,7 +52,7 @@ Requests:
 
 ```json
 {"type":"activate","exePath":"C:\\Program Files\\Example\\Example.exe"}
-{"type":"toggleDesktop"}
+{"type":"showDesktop"}
 ```
 
 Successful/expected results (exit code 0):
@@ -57,7 +61,7 @@ Successful/expected results (exit code 0):
 {"type":"result","status":"activated"}
 {"type":"result","status":"launchRequired"}
 {"type":"result","status":"activationDenied"}
-{"type":"result","status":"desktopToggled"}
+{"type":"result","status":"desktopShown"}
 ```
 
 Errors (exit code 1):
@@ -79,15 +83,20 @@ Errors (exit code 1):
 5. If no eligible window is found, return `launchRequired`. This includes an application running only in the tray. Electron then decides whether to start the already approved executable with zero user arguments.
 6. Do not launch the target from this module, inject input, simulate Alt/Win keys, attach to the input thread, elevate lolPing, modify the registry or bypass foreground restrictions.
 
-## toggleDesktop behavior
+## showDesktop behavior
 
-Use the documented Windows Shell desktop toggle (for example `IShellDispatch4::ToggleDesktop` through COM), not PowerShell, CMD, a script, synthetic Win+D or custom snapshots/minimization of all windows. Balance COM/resource ownership. Report HRESULT failures as `osError`; `desktopToggled` means the system accepted the toggle request, not that a physical end-to-end gesture was verified.
+Use documented `IShellDispatch::MinimizeAll` through COM. Each invocation only minimizes;
+there is no restore action or per-window snapshot. Do not use PowerShell, CMD, a script or
+synthetic Win+D. Balance COM/resource ownership. Report HRESULT failures as `osError`;
+`desktopShown` means the system accepted the request, not that a physical gesture was verified.
+The saved-settings normalizer migrates old `toggleDesktop` entries, but the helper rejects
+the old wire command. Main and helper must be packaged together.
 
 ## Tests and evidence
 
 - Test malformed input, invalid paths, size bounds and expected result serialization through the actual executable.
 - Provide a controlled native GUI fixture for normal, minimized, multiple-window and hidden/tray-like cases. Test matching and restoration against actual Windows windows where possible; never automate unrelated user applications or kill unrelated processes.
-- Exercise two desktop toggles and document what was actually observed. Codex owns the later real lolPing-wheel integration proof.
+- Exercise clearing, repeated clearing without restoration, and clearing a reopened owned window. Record observed effects as well as replies. Codex owns later physical lolPing-wheel proof.
 - No changes to `native/hook-helper/**`, no injected input into a game, no paid AI requests, dependency installation, version bump or release.
 - Record every verification command, exit status, passed/failed/skipped scenarios and remaining manual checks. Mock or synthetic tests must be labeled accurately; they do not prove hardware mouse, UAC, all DPI settings or full lolPing desktop restoration.
 

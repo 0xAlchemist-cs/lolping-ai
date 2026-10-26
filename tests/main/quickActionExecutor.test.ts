@@ -12,7 +12,7 @@ function setup(outcome: 'activated' | 'launchRequired' | 'activationDenied' = 'a
     platform: 'win',
     desktop: { run: async (request) => {
       effects.push(request.type);
-      return { type: 'result', status: request.type === 'toggleDesktop' ? 'desktopToggled' : outcome };
+      return { type: 'result', status: request.type === 'showDesktop' ? 'desktopShown' : outcome };
     } },
     verifyProgram: async (path) => ({ ok: true, exePath: path }),
     openUrl: async (url) => { effects.push(url); await block; },
@@ -70,9 +70,9 @@ describe('QuickActionExecutor', () => {
 
   it('toggles the desktop through the fixed native command', async () => {
     const { executor, effects } = setup();
-    expect(await executor.execute({ name: 'Desktop', enabled: true, target: { kind: 'toggleDesktop' } }))
-      .toEqual({ ok: true, status: 'desktopToggled' });
-    expect(effects).toEqual(['toggleDesktop']);
+    expect(await executor.execute({ name: 'Desktop', enabled: true, target: { kind: 'showDesktop' } }))
+      .toEqual({ ok: true, status: 'desktopShown' });
+    expect(effects).toEqual(['showDesktop']);
   });
 
   it('cancels native work on configuration changes without launching a stale program', async () => {

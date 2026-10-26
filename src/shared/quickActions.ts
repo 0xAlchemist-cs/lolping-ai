@@ -8,7 +8,7 @@ export const isActionPingId = (raw: unknown): raw is ActionPingId => isPingId(ra
 export type QuickActionTarget =
   | { kind: 'web'; url: string }
   | { kind: 'app'; exePath: string }
-  | { kind: 'toggleDesktop' };
+  | { kind: 'showDesktop' };
 
 export interface QuickActionBinding {
   enabled: boolean;
@@ -27,7 +27,7 @@ export type QuickActionError =
   | 'helperUnavailable' | 'helperTimeout' | 'unauthorized';
 
 export type QuickActionResult =
-  | { ok: true; status: 'opened' | 'activated' | 'launchSubmitted' | 'desktopToggled' }
+  | { ok: true; status: 'opened' | 'activated' | 'launchSubmitted' | 'desktopShown' }
   | { ok: false; code: QuickActionError };
 
 export interface QuickActionDraft {
@@ -36,7 +36,7 @@ export interface QuickActionDraft {
   target:
     | { kind: 'web'; url: string }
     | { kind: 'app'; programToken?: string }
-    | { kind: 'toggleDesktop' };
+    | { kind: 'showDesktop' };
 }
 
 export interface QuickActionProgramSelection {
@@ -86,8 +86,9 @@ export function normalizeQuickActionBinding(raw: unknown): QuickActionBinding | 
     case 'app':
       return isLocalExePath(target.exePath)
         ? { enabled: raw.enabled, name, target: { kind: 'app', exePath: target.exePath } } : null;
-    case 'toggleDesktop':
-      return { enabled: raw.enabled, name, target: { kind: 'toggleDesktop' } };
+    case 'toggleDesktop': // Migrate the pre-release toggle to the user's one-way clear action.
+    case 'showDesktop':
+      return { enabled: raw.enabled, name, target: { kind: 'showDesktop' } };
     default:
       return null;
   }

@@ -106,8 +106,8 @@ Only your own wheel selection runs an action; clicks, previews and room members'
   ordinary window, or opens the program again when no suitable window exists. Windows can refuse
   foreground activation; lolPing then reports failure without starting another instance. Tray apps
   and launchers may open another instance. Select the actual application's executable when possible.
-- Toggle the Windows desktop. Trigger again to restore windows under Windows' own rules. A successful
-  request means the shell accepted it; the visible result depends on Windows' desktop state.
+- Clear the screen by asking Windows to minimize desktop windows. Repeating the action keeps them
+  minimized; it never restores them. A successful request means the shell accepted it.
 
 Edits take effect after Save. “Test saved action” runs the saved, enabled binding even when the main
 switch is off. Removing or disabling a binding keeps the original Ping. Names, URLs and program paths

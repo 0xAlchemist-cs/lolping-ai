@@ -667,8 +667,12 @@ strict status/exit parsing and a three-second timeout. Cancellation kills only i
 activation compares full Unicode process paths, chooses the first eligible window in Z order, verifies
 HWND/PID/path again before restore and each foreground attempt, and reports actual foreground success.
 No eligible window returns `launchRequired`; selected but refused/disappeared windows return
-`activationDenied`. `IShellDispatch4::ToggleDesktop` uses Windows' desktop state; `desktopToggled` means
-the shell accepted the request. Input-helper faults and desktop-helper faults have separate lifecycles.
+`activationDenied`. The user's revised desktop action is one-way clearing: `IShellDispatch::MinimizeAll`
+minimizes windows without a restore operation or private window state. The wire command is `showDesktop`
+and `desktopShown` means the shell accepted the request. Stored pre-release `toggleDesktop` targets
+migrate to `showDesktop` individually; the old wire command is rejected. Input-helper faults and
+desktop-helper faults have separate lifecycles. The original Ping images remain; no action names or
+automatic website/program images are added to the wheel.
 
 Windows packaging ships the two production helpers and only the production main/preload/renderer
 directories. Fixtures, test executables and local smoke profiles stay outside the package. Other platforms
@@ -678,7 +682,8 @@ Validation includes shared/Main Vitest tests, the original hook suite, native pr
 typecheck, production builds and independent sandbox preload checks. `tools/quick-actions-smoke.cjs`
 exercises the real Fluent UI with controlled IPC. `tools/ping-actions-smoke.cjs` runs production overlay
 and preload code with synthetic input-bridge events, an owned native window and an explicitly reported
-OS-injected Alt tap. It strictly observes two desktop toggles and preserves the legacy question-mark
+OS-injected Alt tap (omitted with `--no-input`). It strictly observes clearing, a repeated clear without
+restore, then clearing a deliberately reopened test window, and preserves the legacy question-mark
 report. These tests make no physical-mouse, elevated-window or mixed-DPI acceptance claim. Native GUI
 checks expose skipped observations when the session cannot provide foreground or desktop state.
 The smoke's `--dispatch-only` mode measures 100 production-overlay IPC round trips to a stubbed
@@ -698,7 +703,7 @@ are ignored: each settings KeyCapture control announces its initial false state,
 duplicates must not abort an unrelated action. The test checks an active child's probe
 response before actual cancellation and observes settings persistence and helper exit.
 The overlay/native smoke's `--no-input` option omits the test-only Alt tap for a separate
-caller-context comparison; it still requires actual minimize/restore effects. Diagnosis
+caller-context comparison; the current test requires actual one-way minimization effects. Diagnosis
 review and remaining blockers are recorded in `docs/p3-desktop-review.md`.
 The complete-Main smoke's `--latency` mode records 100 guarded OS-injected gestures from real input-helper
 stdout receipt in Main to the controlled `shell.openExternal` boundary. Browser startup,

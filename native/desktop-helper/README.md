@@ -9,7 +9,8 @@ single source of truth for the wire format. Codex owns the Electron side that sp
   path equals the requested local absolute `.exe` path, restores it if minimized, and requests
   foreground activation. No window: `launchRequired`. Window found but not activatable:
   `activationDenied` (with a taskbar flash as an attention fallback).
-- `toggleDesktop` calls `IShellDispatch4::ToggleDesktop` through COM. HRESULT failures come
+- `showDesktop` calls `IShellDispatch::MinimizeAll` through COM. It only minimizes; repeating
+  it never restores windows. HRESULT failures come
   back as `osError` with the HRESULT in `win32` (unsigned decimal).
 
 The helper never launches the target, never injects input, never attaches to another input
@@ -33,7 +34,7 @@ message. Nothing on another platform is ever reported as a Windows result.
 | `src/protocol.{h,cpp}` | Pure request parsing/validation and result serialization. No OS calls; unit-tested directly. |
 | `src/main.cpp` | One-shot stdin/stdout framing: one LF-terminated request line in, one result line out, size caps, exit codes. |
 | `src/activate.{h,cpp}` | Window enumeration, eligibility filtering, path matching, restore + bounded foreground activation. |
-| `src/toggle_desktop.{h,cpp}` | COM `IShellDispatch4::ToggleDesktop` with balanced init/uninit. |
+| `src/toggle_desktop.{h,cpp}` | One-way COM `MinimizeAll` with balanced init/uninit (historical file name). |
 | `tests/protocol_tests.cpp` | 101 unit checks for the pure protocol layer. |
 | `tests/e2e.mjs` | End-to-end checks through the real executable, including GUI fixture scenarios. |
 | `tests/fixture_commands.mjs` | Hidden-window parser/diagnostic checks; no desktop changes or injected input. |
@@ -43,7 +44,7 @@ message. Nothing on another platform is ever reported as a Windows result.
 
 Written down so Codex can flag disagreements instead of discovering them in code:
 
-- Requests must be exactly `{"type":"toggleDesktop"}` or
+- Requests must be exactly `{"type":"showDesktop"}` or
   `{"type":"activate","exePath":"..."}` in any key order. Unknown keys, duplicate keys,
   non-string values, nested values, a missing LF, or any byte after the LF are
   `invalidRequest`. Trailing whitespace on the line is tolerated.
@@ -62,10 +63,19 @@ Written down so Codex can flag disagreements instead of discovering them in code
   destroyed, recycled, changes process or changes path, the helper stops with
   `activationDenied` immediately (well under the 1.5 s bound); `launchRequired` is never
   returned after a selection was made.
-- `desktopToggled` means the shell accepted the request (S_OK); it does not claim a verified
+- `desktopShown` means the shell accepted the request (S_OK); it does not claim a verified
   physical gesture.
 
 ## Verification record
+
+Current revision (2026-10-26): the user explicitly removed desktop restoration. The new
+strict native check observed the first clear minimize its owned window, a second clear
+leave it minimized, and a third clear minimize it again after explicitly restoring only
+the fixture. Native tests: 103 protocol checks, 15 fixture-command checks, 37 end-to-end
+passes, zero failures; one foreground-permission probe skipped with the denial paths
+still checked. The production-overlay `--no-input` smoke also passed all three selections.
+No hardware-mouse or mixed-DPI result is inferred. The following records are historical
+ToggleDesktop investigations; they do not describe the current one-way operation.
 
 Environment: Windows 11 Pro 10.0.26100 x64, interactive desktop session, MSVC 14.44.35207
 (VS 2022 Build Tools), Node 22.15.0. All commands were run from the repository root on

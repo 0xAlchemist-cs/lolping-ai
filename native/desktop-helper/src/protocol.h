@@ -8,7 +8,7 @@ namespace dhp {
 // One validated request. The wire format is a single flat JSON object per process run
 // (docs/p3-desktop-helper-contract.md); everything else is rejected before this struct exists.
 struct Request {
-  enum class Kind { Activate, ToggleDesktop };
+  enum class Kind { Activate, ShowDesktop };
   Kind kind;
   std::string exePathUtf8;  // activate only, decoded, otherwise as it appeared on the wire
 };

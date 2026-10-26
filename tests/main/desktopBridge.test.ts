@@ -15,40 +15,40 @@ describe('DesktopBridge', () => {
   it('runs a one-shot child and returns the validated command result', async () => {
     expect(await make().run({ type: 'activate', exePath: 'C:\\Apps\\Example.exe' }))
       .toEqual({ type: 'result', status: 'launchRequired' });
-    expect(await make().run({ type: 'toggleDesktop' })).toEqual({ type: 'result', status: 'desktopToggled' });
+    expect(await make().run({ type: 'showDesktop' })).toEqual({ type: 'result', status: 'desktopShown' });
   });
 
   it('accepts a structured native error with its expected nonzero exit', async () => {
-    expect(await make('fail').run({ type: 'toggleDesktop' }))
+    expect(await make('fail').run({ type: 'showDesktop' }))
       .toEqual({ type: 'result', status: 'error', code: 'osError', win32: 5 });
   });
 
   it('refuses unknown or oversized native output', async () => {
     for (const mode of ['invalid', 'large']) {
-      expect(await make(mode).run({ type: 'toggleDesktop' }))
+      expect(await make(mode).run({ type: 'showDesktop' }))
         .toEqual({ type: 'bridgeError', code: 'helperUnavailable' });
     }
   });
 
   it('times out and stops its own hung child', async () => {
-    expect(await make('hang', 50).run({ type: 'toggleDesktop' }))
+    expect(await make('hang', 50).run({ type: 'showDesktop' }))
       .toEqual({ type: 'bridgeError', code: 'helperTimeout' });
   });
 
   it('settles an in-flight operation and refuses new operations when closed', async () => {
     const bridge = make('hang');
-    const pending = bridge.run({ type: 'toggleDesktop' });
+    const pending = bridge.run({ type: 'showDesktop' });
     bridge.close();
     expect(await pending).toEqual({ type: 'bridgeError', code: 'helperUnavailable' });
-    expect(await bridge.run({ type: 'toggleDesktop' })).toEqual({ type: 'bridgeError', code: 'helperUnavailable' });
+    expect(await bridge.run({ type: 'showDesktop' })).toEqual({ type: 'bridgeError', code: 'helperUnavailable' });
   });
 
   it('aborts one child without closing the bridge for later operations', async () => {
     const bridge = make();
     const controller = new AbortController();
-    const pending = bridge.run({ type: 'toggleDesktop' }, controller.signal);
+    const pending = bridge.run({ type: 'showDesktop' }, controller.signal);
     controller.abort();
     expect(await pending).toEqual({ type: 'bridgeError', code: 'helperUnavailable' });
-    expect(await bridge.run({ type: 'toggleDesktop' })).toEqual({ type: 'result', status: 'desktopToggled' });
+    expect(await bridge.run({ type: 'showDesktop' })).toEqual({ type: 'result', status: 'desktopShown' });
   });
 });

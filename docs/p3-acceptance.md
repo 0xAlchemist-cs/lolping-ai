@@ -4,10 +4,36 @@ Date: 2026-10-26. Baseline: `34f0e070500fbbbabfd24ba75b8c6008ce13f0e6`.
 Worktree: `D:/lolping/lolPing-p3`, branch `feat/p3a-windows-actions`.
 
 P3 code is available for review, with the feature off by default. **P3 is not accepted for
-completion or release.** The desktop effect is not stable in this Windows session, and
-the required physical-input, elevated-target and mixed-DPI checks remain open. Work stays
-local under the user's latest direction; do not create or update a PR. No merge, release
-or version change is part of this checkpoint.
+completion or release.** Physical-input, elevated-target and mixed-DPI checks remain open.
+The user subsequently authorized pushing and merging, then changed desktop clearing to
+one-way minimization. Merge waits for review of that revision and repeatable full-app
+behavior. No release or version change is part of this checkpoint.
+
+## Current one-way clear revision (2026-10-26)
+
+The user reported that wheel/Ping events still worked when the old ToggleDesktop operation
+stopped moving windows. They explicitly chose clearing only, without restoration. The new
+`showDesktop` operation calls documented Shell `MinimizeAll`; it never toggles or restores.
+Old saved `toggleDesktop` targets migrate individually. The original Ping images remain,
+with no names or automatic website/software images added, following the user's final
+correction. The temporary appearance changes were removed before committing.
+
+Fresh checks for this revision: typecheck, 1415 Vitest tests across 87 files, 542 original
+input-helper checks, 103 desktop protocol checks and 15 hidden-fixture checks passed.
+Strict desktop e2e: 37 passed, zero failures, one visible foreground-permission probe skip;
+the denial paths were checked. Actual effects observed: clear minimized an owned window,
+repeating kept it minimized, and clearing after explicitly reopening it minimized it again.
+The production wheel/preload/native smoke with `--no-input` also passed all three selections.
+Those wheel events were synthetic; no physical-mouse result is inferred.
+
+The restored-icon Fluent smoke passed (3 saves, 2 controlled tests, 3 picks, 1 removal),
+and a fresh unpacked Windows package passed resource/archive verification. The user's
+desktop shortcut and running app now point to that local package, using their existing
+settings. Other bindings were retained; the current clear target is `showDesktop`.
+The user then repeated clearing through their real Alt wheel, reopening a window between
+attempts, and explicitly reported that every attempt succeeded. This confirms that local
+scenario; it does not cover the remaining DPI, secure-desktop or other-trigger matrix.
+Earlier toggle failures below are historical evidence, not a test of the new operation.
 
 ## Automated evidence run by Codex
 
@@ -52,7 +78,7 @@ profile-cache extraction directory. Its supported `ELECTRON_BUILDER_CACHE` overr
 `out/builder-cache` resolved the failure. The application/package configuration was not
 weakened; the build cache is excluded from `app.asar` by the production allowlist.
 
-## Strict desktop observation: unresolved
+## Historical strict ToggleDesktop observation
 
 `node tools/ping-actions-smoke.cjs` uses production overlay/preload code, Main session
 validation and the real bundled desktop helper. Input-bridge events are synthetic. A
@@ -95,8 +121,8 @@ actions, inject production shortcuts or suppress existing features to obtain a p
 
 ## Acceptance still required
 
-- Resolve the intermittent no-effect desktop behavior and record repeatable two-gesture
-  desktop restoration in the full app, including existing AI cards and other overlays.
+- Confirm repeatable one-way clearing in the full app, including reopened windows,
+  existing AI cards and other overlays. Restoration is no longer a product action.
 - Physical mouse with the existing trigger keys and side buttons; click/pass-through,
   center/Esc/right-click cancellation, pause and settings key capture. The controlled
   real-hook checks now pass with OS-injected input; see `p3-input-verification.md` for

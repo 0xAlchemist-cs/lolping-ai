@@ -75,6 +75,13 @@ describe('quickActions', () => {
     expect(isLocalExePath(`C:\\a${atLimit.slice(3)}`)).toBe(false);
   });
 
+  it('migrates the old desktop toggle to one-way clear', () => {
+    expect(normalizeQuickActionBinding({ enabled: true, name: 'Desktop', target: { kind: 'toggleDesktop' } }))
+      .toEqual({ enabled: true, name: 'Desktop', target: { kind: 'showDesktop' } });
+    expect(normalizeQuickActionBinding({ enabled: true, name: 'Clear', target: { kind: 'showDesktop' } }))
+      .toEqual({ enabled: true, name: 'Clear', target: { kind: 'showDesktop' } });
+  });
+
   it('rebuilds each supported target with a trimmed printable label', () => {
     expect(normalizeQuickActionBinding({ enabled: true, name: '  Docs  ', extra: 'drop',
       target: { kind: 'web', url: 'https://EXAMPLE.com', exePath: 'C:\\other.exe' } }))
@@ -82,8 +89,8 @@ describe('quickActions', () => {
     expect(normalizeQuickActionBinding({ enabled: false, name: '编辑器',
       target: { kind: 'app', exePath: "C:\\O'Brien & Sons\\app.exe", programToken: 'drop' } }))
       .toEqual({ enabled: false, name: '编辑器', target: { kind: 'app', exePath: "C:\\O'Brien & Sons\\app.exe" } });
-    expect(normalizeQuickActionBinding({ enabled: true, name: 'Desktop', target: { kind: 'toggleDesktop', url: 'drop' } }))
-      .toEqual({ enabled: true, name: 'Desktop', target: { kind: 'toggleDesktop' } });
+    expect(normalizeQuickActionBinding({ enabled: true, name: 'Desktop', target: { kind: 'showDesktop', url: 'drop' } }))
+      .toEqual({ enabled: true, name: 'Desktop', target: { kind: 'showDesktop' } });
   });
 
   it('requires a boolean enabled flag, a printable label and a valid target even when disabled', () => {
@@ -102,7 +109,7 @@ describe('quickActions', () => {
   });
 
   it('limits names to 64 code points without silently truncating labels', () => {
-    const target = { kind: 'toggleDesktop' };
+    const target = { kind: 'showDesktop' };
     expect(normalizeQuickActionBinding({ enabled: true, name: '😀'.repeat(64), target })?.name)
       .toBe('😀'.repeat(64));
     expect(normalizeQuickActionBinding({ enabled: true, name: '😀'.repeat(65), target })).toBeNull();
@@ -110,7 +117,7 @@ describe('quickActions', () => {
   });
 
   it('returns fresh empty settings for missing, broken and unsupported configurations', () => {
-    const binding = { enabled: true, name: 'Desktop', target: { kind: 'toggleDesktop' } };
+    const binding = { enabled: true, name: 'Desktop', target: { kind: 'showDesktop' } };
     for (const raw of [
       undefined, null, 1, [], {}, { version: 1 }, { version: 1, bindings: [] },
       { bindings: { danger: binding } }, { version: '1', bindings: { danger: binding } },
@@ -123,7 +130,7 @@ describe('quickActions', () => {
   });
 
   it('drops malformed and reserved entries individually without losing valid disabled bindings', () => {
-    const desktop = { enabled: true, name: 'Desktop', target: { kind: 'toggleDesktop' } };
+    const desktop = { enabled: true, name: 'Desktop', target: { kind: 'showDesktop' } };
     const raw = { version: 1, bindings: {
       danger: desktop, missing: desktop, missingflip: { ...desktop, enabled: false },
       unknown: desktop, generic: { ...desktop, name: '' }, push: { ...desktop, target: { kind: 'unknown' } },
@@ -134,7 +141,7 @@ describe('quickActions', () => {
   });
 
   it('rebuilds action data independently of the loaded input and ignores inherited bindings', () => {
-    const binding = { enabled: true, name: 'Desktop', target: { kind: 'toggleDesktop' } };
+    const binding = { enabled: true, name: 'Desktop', target: { kind: 'showDesktop' } };
     const raw = { version: 1, bindings: { danger: binding } };
     const normalized = normalizeQuickActions(raw);
     expect(normalized.bindings.danger).not.toBe(binding);

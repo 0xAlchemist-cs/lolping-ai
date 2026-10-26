@@ -226,9 +226,9 @@ bool parseRequest(const std::string& line, Request& out, ErrorCode& code) {
   skipWs(line, i);
   if (i != line.size()) return false;  // trailing garbage
   if (!hasType) return false;
-  if (type == "toggleDesktop") {
+  if (type == "showDesktop") {
     if (hasExePath) return false;
-    out.kind = Request::Kind::ToggleDesktop;
+    out.kind = Request::Kind::ShowDesktop;
     return true;
   }
   if (type != "activate") return false;

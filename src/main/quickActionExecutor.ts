@@ -28,7 +28,7 @@ export class QuickActionExecutor {
     if (!allowed()) return { ok: false, code: 'disabled' };
     const target = binding.target;
     const key = target.kind === 'web' ? `web:${target.url}`
-      : target.kind === 'app' ? `app:${target.exePath.toLowerCase()}` : 'toggleDesktop';
+      : target.kind === 'app' ? `app:${target.exePath.toLowerCase()}` : 'showDesktop';
     if (this.inFlight.has(key)) return { ok: false, code: 'busy' };
     this.inFlight.add(key);
     this.controllers.add(controller);
@@ -58,12 +58,12 @@ export class QuickActionExecutor {
         return { ok: true, status: 'launchSubmitted' };
       }
       if (!allowed()) return { ok: false, code: 'disabled' };
-      const reply = await this.options.desktop.run({ type: 'toggleDesktop' }, controller.signal);
+      const reply = await this.options.desktop.run({ type: 'showDesktop' }, controller.signal);
       if (!allowed()) return { ok: false, code: 'disabled' };
       if (reply.type === 'bridgeError') return { ok: false, code: reply.code };
-      return reply.status === 'desktopToggled' ? { ok: true, status: 'desktopToggled' } : { ok: false, code: 'desktopFailed' };
+      return reply.status === 'desktopShown' ? { ok: true, status: 'desktopShown' } : { ok: false, code: 'desktopFailed' };
     } catch {
-      return { ok: false, code: target.kind === 'toggleDesktop' ? 'desktopFailed' : 'launchFailed' };
+      return { ok: false, code: target.kind === 'showDesktop' ? 'desktopFailed' : 'launchFailed' };
     } finally {
       this.inFlight.delete(key);
       this.controllers.delete(controller);

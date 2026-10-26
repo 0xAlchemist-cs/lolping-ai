@@ -145,7 +145,7 @@ function BindingEditor({ pingId, saved, onSaved }: {
     pending.current = false;
     setBusy(null);
     edit({ kind, url: '', exePath: '', programToken: undefined,
-      ...(!nameEdited.current ? { name: kind === 'toggleDesktop' ? t.quickActions.types.toggleDesktop : '' } : {}) });
+      ...(!nameEdited.current ? { name: kind === 'showDesktop' ? t.quickActions.types.showDesktop : '' } : {}) });
   };
   const pick = async () => {
     if (pending.current) return;
@@ -179,10 +179,10 @@ function BindingEditor({ pingId, saved, onSaved }: {
       } else {
         const target: QuickActionDraft['target'] = draft.kind === 'web' ? { kind: 'web', url: draft.url }
           : draft.kind === 'app' ? { kind: 'app', ...(draft.programToken ? { programToken: draft.programToken } : {}) }
-            : { kind: 'toggleDesktop' };
+            : { kind: 'showDesktop' };
         const name = draft.name.trim() || (draft.kind === 'web' ? hostname(draft.url)
           : draft.kind === 'app' ? draft.exePath.split(/[\\/]/).pop()?.replace(/\.exe$/i, '') ?? ''
-            : t.quickActions.types.toggleDesktop);
+            : t.quickActions.types.showDesktop);
         const result = operation === 'remove' ? await api.removeQuickAction(pingId)
           : await api.saveQuickAction(pingId, { enabled: draft.enabled, name, target });
         if (!alive.current || current !== revision.current) return;
@@ -219,9 +219,9 @@ function BindingEditor({ pingId, saved, onSaved }: {
         <Dropdown value={t.quickActions.types[draft.kind]} selectedOptions={[draft.kind]} disabled={locked}
           onOptionSelect={(_, data) => {
             const kind = data.optionValue;
-            if (kind === 'web' || kind === 'app' || kind === 'toggleDesktop') changeType(kind);
+            if (kind === 'web' || kind === 'app' || kind === 'showDesktop') changeType(kind);
           }}>
-          {(['web', 'app', 'toggleDesktop'] as const).map((kind) => (
+          {(['web', 'app', 'showDesktop'] as const).map((kind) => (
             <Option key={kind} value={kind}>{t.quickActions.types[kind]}</Option>
           ))}
         </Dropdown>

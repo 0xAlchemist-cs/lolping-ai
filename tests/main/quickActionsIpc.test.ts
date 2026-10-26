@@ -128,7 +128,7 @@ describe('quick action IPC', () => {
   });
 
   it('reserves missing even through forged IPC and rejects invalid URLs without overwriting a binding', async () => {
-    const draft = { enabled: true, name: 'Desktop', target: { kind: 'toggleDesktop' } };
+    const draft = { enabled: true, name: 'Desktop', target: { kind: 'showDesktop' } };
     for (const channel of [SETTINGS_CH.quickActionSave, SETTINGS_CH.quickActionRemove, SETTINGS_CH.quickActionTest]) {
       expect(await call(channel, 'missing', draft)).toEqual({ ok: false, code: 'invalidBinding' });
     }
@@ -136,7 +136,7 @@ describe('quick action IPC', () => {
     expect(await call(SETTINGS_CH.quickActionSave, 'danger', {
       ...draft, target: { kind: 'web', url: 'javascript:alert(1)' },
     })).toEqual({ ok: false, code: 'invalidUrl' });
-    expect(store.get().quickActions.bindings.danger?.target).toEqual({ kind: 'toggleDesktop' });
+    expect(store.get().quickActions.bindings.danger?.target).toEqual({ kind: 'showDesktop' });
     expect(await call(SETTINGS_CH.quickActionRemove, 'danger')).toMatchObject({ ok: true });
     expect(store.get().quickActions.bindings).toEqual({});
   });
