@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
 
-export type DesktopCommand = { type: 'activate'; exePath: string } | { type: 'showDesktop' };
+export type DesktopCommand = { type: 'activate'; exePath: string } | { type: 'showDesktop' }
+  | { type: 'flushComposition' } | { type: 'styleWindow'; hwnd: string; ownerPid: string };
 export type DesktopReply =
-  | { type: 'result'; status: 'activated' | 'launchRequired' | 'activationDenied' | 'desktopShown' }
+  | { type: 'result'; status: 'activated' | 'launchRequired' | 'activationDenied' | 'desktopShown' | 'compositionFlushed' | 'frameStyled' }
   | { type: 'result'; status: 'error'; code: 'invalidRequest' | 'invalidPath' | 'osError'; win32?: number }
   | { type: 'bridgeError'; code: 'helperUnavailable' | 'helperTimeout' };
 
@@ -20,6 +21,7 @@ function parseReply(text: string, exitCode: number | null): DesktopReply | null 
     if (o.type !== 'result') return null;
     switch (o.status) {
       case 'activated': case 'launchRequired': case 'activationDenied': case 'desktopShown':
+      case 'compositionFlushed': case 'frameStyled':
         return exitCode === 0 ? { type: 'result', status: o.status } : null;
       case 'error': {
         if (exitCode !== 1 || !['invalidRequest', 'invalidPath', 'osError'].includes(String(o.code))) return null;

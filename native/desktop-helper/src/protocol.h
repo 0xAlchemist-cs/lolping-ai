@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace dhp {
@@ -8,9 +9,11 @@ namespace dhp {
 // One validated request. The wire format is a single flat JSON object per process run
 // (docs/p3-desktop-helper-contract.md); everything else is rejected before this struct exists.
 struct Request {
-  enum class Kind { Activate, ShowDesktop };
+  enum class Kind { Activate, ShowDesktop, FlushComposition, StyleWindow };
   Kind kind;
   std::string exePathUtf8;  // activate only, decoded, otherwise as it appeared on the wire
+  std::uint64_t hwnd = 0;
+  std::uint32_t ownerPid = 0;
 };
 
 // Wire error codes from the contract.

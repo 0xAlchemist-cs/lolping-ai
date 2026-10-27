@@ -94,6 +94,18 @@ the old wire command. Main and helper must be packaged together.
 
 ## Tests and evidence
 
+### Fixed DWM operations (2026-10-27)
+
+The release-hardening revision also replaces the two Main PowerShell launches with
+`{"type":"flushComposition"}` and
+`{"type":"styleWindow","hwnd":"42","ownerPid":"123"}`. Values stay strings in
+the flat protocol. The HWND must be positive and at most INT64_MAX; the PID must be
+positive and at most UINT32_MAX. Wrong/missing/extra/duplicate fields are rejected.
+The native frame operation verifies HWND/PID before and after calling the fixed
+dark-frame DWM attribute. Results are `compositionFlushed` or `frameStyled`; errors
+use the existing `osError` result. Main applies a five-second bound. No new renderer
+IPC or input-helper command is added. See `release-readiness.md` for actual checks.
+
 - Test malformed input, invalid paths, size bounds and expected result serialization through the actual executable.
 - Provide a controlled native GUI fixture for normal, minimized, multiple-window and hidden/tray-like cases. Test matching and restoration against actual Windows windows where possible; never automate unrelated user applications or kill unrelated processes.
 - Exercise clearing, repeated clearing without restoration, and clearing a reopened owned window. Record observed effects as well as replies. Codex owns later physical lolPing-wheel proof.

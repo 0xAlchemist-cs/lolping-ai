@@ -1,21 +1,11 @@
 import { app, BrowserWindow } from 'electron';
-import { execFile } from 'node:child_process';
-import { join } from 'node:path';
-
-/** A constant command, with no image, window title or user input passed to the child. */
-const FLUSH_COMMAND = `Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class LolPingDwm { [DllImport("dwmapi.dll")] public static extern int DwmFlush(); }'; if ([LolPingDwm]::DwmFlush() -ne 0) { exit 1 }`;
+import { runDesktopSystemTask } from './desktopSystem';
 
 /** Requests a DWM present after hide; this is not a cross-process rendering fence (see docs/design.md). */
-export function waitForDesktopComposition(): Promise<void> {
-  if (process.platform !== 'win32') return Promise.reject(new Error('windowsNotHidden'));
-  const windowsRoot = process.env.SystemRoot;
-  if (!windowsRoot) return Promise.reject(new Error('windowsNotHidden'));
-  return new Promise((resolve, reject) => {
-    execFile(join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', FLUSH_COMMAND],
-      { windowsHide: true, timeout: 5000, maxBuffer: 1024 },
-      (error) => error ? reject(new Error('windowsNotHidden')) : resolve());
-  });
+export async function waitForDesktopComposition(): Promise<void> {
+  if (process.platform !== 'win32' || !await runDesktopSystemTask({ type: 'flushComposition' })) {
+    throw new Error('windowsNotHidden');
+  }
 }
 
 export interface CaptureWindowsOptions {

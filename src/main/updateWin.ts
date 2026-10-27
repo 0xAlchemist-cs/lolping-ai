@@ -1,5 +1,6 @@
 import { autoUpdater, CancellationToken, type AppUpdater, type ProgressInfo } from 'electron-updater';
 import { DamagedDownloadError, type UpdateBackend, type UpdateInfo } from './updater';
+import { PROJECT_OWNER, PROJECT_REPO, RELEASES_PAGE } from '../shared/project';
 
 /** A check that hasn't answered by now has failed: electron-updater has no timeout of its own, so a hung request would hold `checking` forever. */
 export const CHECK_TIMEOUT_MS = 30_000;
@@ -10,7 +11,7 @@ export const CHECK_TIMEOUT_MS = 30_000;
  */
 export const INSTALL_TOAST_MS = 1500;
 
-const RELEASE_PAGE = 'https://github.com/darrenprx/lolPing/releases/tag/v';
+const RELEASE_PAGE = `${RELEASES_PAGE}/tag/v`;
 
 export interface WinBackendDeps {
   /** LOLPING_UPDATE_TEST_URL: a folder that serves latest.yml, used instead of GitHub. */
@@ -53,6 +54,8 @@ export class WinBackend implements UpdateBackend {
     if (this.deps.testUrl) {
       u.setFeedURL({ provider: 'generic', url: this.deps.testUrl });
       u.forceDevUpdateConfig = true; // a development build has no app-update.yml
+    } else {
+      u.setFeedURL({ provider: 'github', owner: PROJECT_OWNER, repo: PROJECT_REPO });
     }
   }
 

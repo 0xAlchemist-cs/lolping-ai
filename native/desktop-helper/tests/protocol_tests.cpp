@@ -52,6 +52,21 @@ int main() {
   {
     Request r{};
     ErrorCode code = ErrorCode::OsError;
+    CHECK(parseRequest(R"({"type":"flushComposition"})", r, code));
+    CHECK(parseRequest(R"({"type":"styleWindow","hwnd":"42","ownerPid":"123"})", r, code));
+    CHECK(rejected(R"({"type":"styleWindow","hwnd":"0","ownerPid":"123"})", ErrorCode::InvalidRequest));
+    CHECK(rejected(R"({"type":"styleWindow","hwnd":"9223372036854775808","ownerPid":"123"})", ErrorCode::InvalidRequest));
+    CHECK(rejected(R"({"type":"styleWindow","hwnd":"42","ownerPid":"4294967296"})", ErrorCode::InvalidRequest));
+    CHECK(rejected(R"({"type":"styleWindow","hwnd":"42","ownerPid":"-1"})", ErrorCode::InvalidRequest));
+    CHECK(rejected(R"({"type":"styleWindow","hwnd":"1.5","ownerPid":"123"})", ErrorCode::InvalidRequest));
+    CHECK(rejected(R"({"type":"styleWindow","hwnd":42,"ownerPid":"123"})", ErrorCode::InvalidRequest));
+    CHECK(rejected(R"({"type":"styleWindow","hwnd":"42","ownerPid":"123","hwnd":"43"})", ErrorCode::InvalidRequest));
+    CHECK(rejected(R"({"type":"flushComposition","hwnd":"42"})", ErrorCode::InvalidRequest));
+    CHECK(rejected(R"({"type":"showDesktop","ownerPid":"123"})", ErrorCode::InvalidRequest));
+  }
+  {
+    Request r{};
+    ErrorCode code = ErrorCode::OsError;
     CHECK(parseRequest(R"({"type":"showDesktop"})", r, code));
     CHECK(rejected(R"({"type":"showDesktop","exePath":"C:\\app.exe"})", ErrorCode::InvalidRequest));
   }

@@ -3,8 +3,8 @@ import { mkdir, open, rename, rm, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isNewer, isVersion } from '../shared/update';
 import { DamagedDownloadError, type UpdateBackend, type UpdateInfo } from './updater';
+export { RELEASES_API } from '../shared/project';
 
-export const RELEASES_API = 'https://api.github.com/repos/darrenprx/lolPing';
 const API_TIMEOUT_MS = 15_000;
 
 export interface MacBackendDeps {

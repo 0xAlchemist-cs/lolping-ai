@@ -31,9 +31,9 @@ describe('release workflow', () => {
     expect(job('mac')).toContain('release/lolPing-${GITHUB_REF_NAME#v}-arm64.dmg');
   });
 
-  it('publishes the draft in a last job that waits for both platform jobs', () => {
+  it('publishes the draft only after all three platform jobs finish', () => {
     const publish = job('publish');
-    expect(publish).toMatch(/needs: \[windows, mac\]/);
+    expect(publish).toMatch(/needs: \[windows, mac, linux\]/);
     expect(publish).toContain('gh release edit "$GITHUB_REF_NAME" --draft=false');
     expect(publish).toMatch(/GH_REPO: \$\{\{ github\.repository \}\}/); // no checkout in this job, so gh needs to be told the repository
   });

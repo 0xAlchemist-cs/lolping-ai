@@ -13,7 +13,9 @@ else {
       process.exitCode = 1;
     } else {
       const request = JSON.parse(line);
-      const status = request.type === 'activate' ? 'launchRequired' : 'desktopShown';
+      const status = request.type === 'activate' ? 'launchRequired'
+        : request.type === 'flushComposition' ? 'compositionFlushed'
+          : request.type === 'styleWindow' ? 'frameStyled' : 'desktopShown';
       process.stdout.write(JSON.stringify({ type: 'result', status }) + '\n');
     }
   });

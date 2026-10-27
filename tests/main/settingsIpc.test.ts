@@ -48,14 +48,32 @@ beforeEach(() => {
 });
 
 /** Registers the handlers again, with or without an update checker. */
-function registerWith(update?: SettingsIpcDeps['update']): void {
+function registerWith(update?: SettingsIpcDeps['update'], setLoginItem?: (enabled: boolean) => void): void {
   h.handlers.clear();
   registerSettingsIpc({
-    store, library, text: () => strings('en'), platform: 'win', room: {}, update,
+    store, library, text: () => strings('en'), platform: 'win', room: {}, update, setLoginItem,
   } as unknown as SettingsIpcDeps);
 }
 
 describe('settings IPC', () => {
+  it('refuses an unapplied login-item change before changing saved preferences', async () => {
+    registerWith(undefined, () => { throw new Error('synthetic OS refusal'); });
+    expect(await call(SETTINGS_CH.set, { launchAtStartup: true, volume: 12 })).toMatchObject({ ok: false });
+    expect(store.get().launchAtStartup).toBe(false);
+    expect(store.get().volume).not.toBe(12);
+  });
+
+  it('applies a requested login-item change before saving and skips unrelated edits', async () => {
+    const observed: boolean[] = [];
+    registerWith(undefined, (enabled) => {
+      observed.push(enabled);
+      expect(store.get().launchAtStartup).toBe(false);
+    });
+    expect(await call(SETTINGS_CH.set, { volume: 12 })).toMatchObject({ ok: true });
+    expect(observed).toEqual([]);
+    expect(await call(SETTINGS_CH.set, { launchAtStartup: true })).toMatchObject({ ok: true });
+    expect(observed).toEqual([true]);
+  });
   it('opens the current fork when the settings GitHub button is clicked', async () => {
     await call(SETTINGS_CH.openProject);
     expect(h.opened).toEqual(['https://github.com/0xAlchemist-cs/lolping-ai']);
@@ -243,13 +261,13 @@ describe('update IPC', () => {
       h.opened.length = 0;
       registerWith(fakeUpdate(state, null));
       await call(SETTINGS_CH.updateOpenRelease);
-      expect(h.opened, state.phase).toEqual(['https://github.com/darrenprx/lolPing/releases/latest']);
+      expect(h.opened, state.phase).toEqual(['https://github.com/0xAlchemist-cs/lolping-ai/releases/latest']);
     }
   });
 
   it('openReleasePage never opens a link that is not a web page', async () => {
     registerWith(fakeUpdate(AVAILABLE, 'file:///C:/Windows/System32/calc.exe'));
     await call(SETTINGS_CH.updateOpenRelease);
-    expect(h.opened).toEqual(['https://github.com/darrenprx/lolPing/releases/latest']);
+    expect(h.opened).toEqual(['https://github.com/0xAlchemist-cs/lolping-ai/releases/latest']);
   });
 });

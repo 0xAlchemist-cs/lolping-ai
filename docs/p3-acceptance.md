@@ -1,5 +1,23 @@
 # P3 implementation and acceptance checkpoint
 
+Current follow-up (2026-10-27): PR #6 was merged by the user and its three-platform
+CI passed. The historical pre-merge checkpoints below are retained as evidence.
+The user confirmed repeated one-way clearing with the original icons. Version
+0.6.0 release preparation, installation/upgrade, login registration and the remaining
+physical matrix are tracked in [release readiness](release-readiness.md).
+The user also confirmed all requested single-screen 100%, 150% and 200% checks on
+the installed 0.6.0 build passed: wheel position/selection, website/program actions,
+repeated clearing, local screenshot alignment and cancellation. Mixed-DPI external
+displays remain untested; the historical pending-DPI entries below are superseded
+only for this single-screen scope.
+In a separate Win+L check on 2026-10-27, the user confirmed Alt wheel, website
+action and clearing all worked normally after unlocking the installed 0.6.0 build.
+This does not close UAC secure-desktop or actual login-start acceptance.
+The user subsequently waived the UAC prompt-return check for this delivery. Record
+it as untested and waived, not passed; it no longer blocks delivery. Actual login
+start remains deferred to a later normal login, and elevated-target activation is
+still unverified.
+
 Date: 2026-10-26. Baseline: `34f0e070500fbbbabfd24ba75b8c6008ce13f0e6`.
 Worktree: `D:/lolping/lolPing-p3`, branch `feat/p3a-windows-actions`.
 

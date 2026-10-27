@@ -14,7 +14,7 @@ call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 cd /d "%~dp0"
 if not exist build\obj mkdir build\obj
 set FLAGS=/nologo /std:c++20 /EHsc /W4 /WX /MT /DUNICODE /D_UNICODE /Fobuild\obj\
-cl %FLAGS% /O2 src\main.cpp src\protocol.cpp src\activate.cpp src\toggle_desktop.cpp /Fe:build\desktop-helper.exe /link user32.lib ole32.lib dwmapi.lib || exit /b 1
+cl %FLAGS% /O2 src\main.cpp src\protocol.cpp src\activate.cpp src\toggle_desktop.cpp src\window_dwm.cpp /Fe:build\desktop-helper.exe /link user32.lib ole32.lib dwmapi.lib || exit /b 1
 cl %FLAGS% /Od tests\protocol_tests.cpp src\protocol.cpp /Fe:build\desktop_helper_tests.exe || exit /b 1
 cl %FLAGS% /O2 fixtures\fixture_app.cpp /Fe:build\fixture_app.exe /link user32.lib || exit /b 1
 echo Built build\desktop-helper.exe, build\desktop_helper_tests.exe and build\fixture_app.exe

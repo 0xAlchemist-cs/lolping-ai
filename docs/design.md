@@ -471,8 +471,9 @@ inside all four edges. The full monitor preview preserves the whole monitor and 
 1920 × 1080. Both JPEGs carry normalised markers for the same original image pixel.
 
 `captureWindows.ts` temporarily protects and hides this app's windows, including windows created or shown during the
-operation. A constant PowerShell command calls the system DWM API before capture. It carries no image or user input,
-uses no Hook, and times out after five seconds. `DwmFlush` in that child is an additional composition wait, not a
+operation. A fixed `flushComposition` request to the bundled desktop helper calls the DWM API before capture.
+It uses no shell or environment-selected program, carries no image or user input, and times out after five seconds.
+`DwmFlush` in that child is an additional composition wait, not a
 cross-process rendering fence: Microsoft only promises flushing the caller's queued changes. Native hidden-state checks,
 temporary content protection and a real coloured-target capture test provide the additional checks. Exclusion on every
 Windows compositor, remote session or protected full-screen application is not claimed. The scope restores surviving

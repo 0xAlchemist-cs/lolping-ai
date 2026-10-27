@@ -16,6 +16,9 @@ describe('DesktopBridge', () => {
     expect(await make().run({ type: 'activate', exePath: 'C:\\Apps\\Example.exe' }))
       .toEqual({ type: 'result', status: 'launchRequired' });
     expect(await make().run({ type: 'showDesktop' })).toEqual({ type: 'result', status: 'desktopShown' });
+    expect(await make().run({ type: 'flushComposition' })).toEqual({ type: 'result', status: 'compositionFlushed' });
+    expect(await make().run({ type: 'styleWindow', hwnd: '42', ownerPid: '123' }))
+      .toEqual({ type: 'result', status: 'frameStyled' });
   });
 
   it('accepts a structured native error with its expected nonzero exit', async () => {

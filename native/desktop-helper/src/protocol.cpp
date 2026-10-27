@@ -177,13 +177,28 @@ bool isValidLocalExePath(const std::string& p) {
   return ext[0] == '.' && ext[1] == 'e' && ext[2] == 'x' && ext[3] == 'e';
 }
 
+bool positiveDecimal(const std::string& text, std::uint64_t limit, std::uint64_t& out) {
+  if (text.empty() || text.size() > 20) return false;
+  std::uint64_t value = 0;
+  for (const char ch : text) {
+    if (ch < '0' || ch > '9') return false;
+    const auto digit = static_cast<std::uint64_t>(ch - '0');
+    if (value > (limit - digit) / 10) return false;
+    value = value * 10 + digit;
+  }
+  if (value == 0) return false;
+  out = value;
+  return true;
+}
+
 }  // namespace
 
 bool parseRequest(const std::string& line, Request& out, ErrorCode& code) {
   code = ErrorCode::InvalidRequest;
-  bool hasType = false, hasExePath = false;
+  bool hasType = false, hasExePath = false, hasHwnd = false, hasOwnerPid = false;
   std::string type;
   std::string exePath;
+  std::string hwnd, ownerPid;
   size_t i = 0;
   skipWs(line, i);
   if (i >= line.size() || line[i] != '{') return false;
@@ -208,6 +223,12 @@ bool parseRequest(const std::string& line, Request& out, ErrorCode& code) {
       } else if (key == "exePath" && !hasExePath) {
         hasExePath = true;
         exePath = value;
+      } else if (key == "hwnd" && !hasHwnd) {
+        hasHwnd = true;
+        hwnd = value;
+      } else if (key == "ownerPid" && !hasOwnerPid) {
+        hasOwnerPid = true;
+        ownerPid = value;
       } else {
         return false;  // unknown key or a repeat of one
       }
@@ -226,13 +247,23 @@ bool parseRequest(const std::string& line, Request& out, ErrorCode& code) {
   skipWs(line, i);
   if (i != line.size()) return false;  // trailing garbage
   if (!hasType) return false;
-  if (type == "showDesktop") {
-    if (hasExePath) return false;
-    out.kind = Request::Kind::ShowDesktop;
+  if (type == "showDesktop" || type == "flushComposition") {
+    if (hasExePath || hasHwnd || hasOwnerPid) return false;
+    out.kind = type == "showDesktop" ? Request::Kind::ShowDesktop : Request::Kind::FlushComposition;
+    return true;
+  }
+  if (type == "styleWindow") {
+    if (hasExePath || !hasHwnd || !hasOwnerPid) return false;
+    std::uint64_t parsedHwnd = 0, parsedPid = 0;
+    if (!positiveDecimal(hwnd, 0x7fffffffffffffffULL, parsedHwnd)
+        || !positiveDecimal(ownerPid, 0xffffffffULL, parsedPid)) return false;
+    out.kind = Request::Kind::StyleWindow;
+    out.hwnd = parsedHwnd;
+    out.ownerPid = static_cast<std::uint32_t>(parsedPid);
     return true;
   }
   if (type != "activate") return false;
-  if (!hasExePath) return false;
+  if (!hasExePath || hasHwnd || hasOwnerPid) return false;
   if (!isValidLocalExePath(exePath)) {
     code = ErrorCode::InvalidPath;
     return false;

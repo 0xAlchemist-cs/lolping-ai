@@ -1,7 +1,12 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const h = vi.hoisted(() => ({ windows: [] as unknown[], application: null as EventEmitter | null }));
+const h = vi.hoisted(() => ({ windows: [] as unknown[], application: null as EventEmitter | null,
+  system: vi.fn<() => Promise<boolean>>(),
+  execFile: vi.fn((_path: unknown, _args: unknown, _options: unknown, callback: (e: Error) => void) => callback(new Error('untrusted command'))),
+}));
+vi.mock('../../src/main/desktopSystem', () => ({ runDesktopSystemTask: h.system }));
+vi.mock('node:child_process', () => ({ execFile: h.execFile }));
 vi.mock('electron', async () => {
   const { EventEmitter: Emitter } = await import('node:events');
   h.application = new Emitter();
@@ -33,11 +38,22 @@ class Window extends EventEmitter {
 let capture: typeof import('../../src/main/captureWindows').withCaptureWindowsHidden;
 beforeEach(async () => {
   h.windows = [];
+  h.system.mockReset();
+  h.execFile.mockClear();
   vi.resetModules();
   capture = (await import('../../src/main/captureWindows')).withCaptureWindowsHidden;
 });
 
 describe('captureWindows', () => {
+  it.skipIf(process.platform !== 'win32')('flushes composition without using an environment-selected system program', async () => {
+    vi.stubEnv('SystemRoot', 'Z:\\untrusted');
+    h.system.mockResolvedValue(true);
+    try {
+      const { waitForDesktopComposition } = await import('../../src/main/captureWindows');
+      await expect(waitForDesktopComposition()).resolves.toBeUndefined();
+      expect(h.execFile).not.toHaveBeenCalled();
+    } finally { vi.unstubAllEnvs(); }
+  });
   it('waits for composition with all windows hidden and restores their previous state', async () => {
     const overlay = new Window();
     const card = new Window();

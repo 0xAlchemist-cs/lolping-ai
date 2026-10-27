@@ -17,6 +17,13 @@ The helper never launches the target, never injects input, never attaches to ano
 thread, and never expands command strings: an `exePath` is only compared against
 `QueryFullProcessImageNameW` output.
 
+Release hardening adds `flushComposition` and `styleWindow` as fixed DWM operations,
+replacing Main's environment-selected PowerShell invocations. They accept no script
+or executable target. Window styling validates its numeric HWND/owner PID; Main bounds
+these jobs to five seconds. `node native/desktop-helper/tests/dwm.mjs` verifies actual
+hidden-window DWM calls with a poisoned SystemRoot, without changing foreground or
+minimizing user windows. See the collaboration contract for the exact fields/results.
+
 ## Build and test
 
 ```powershell
