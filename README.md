@@ -74,9 +74,11 @@ On Windows, **hold Alt, press the left mouse button, drag to a slice and release
 
 Trigger keys and mouse side buttons are configurable. Normal clicks do not run quick actions. On macOS, Control replaces Ctrl.
 
-<p align="center"><img src="docs/media/demo.gif" width="880" alt="The original ping wheel placing Enemy Missing signals over a desktop application"></p>
+https://github.com/user-attachments/assets/f1f9781a-1425-4763-86c4-01c346980feb
 
-The animation shows the base wheel, not the AI or quick-action settings.
+50-second Windows recording with Chinese captions: emotes, AI answers, local screenshot previews,
+website and program shortcuts, and screen clearing. Idle waits are shortened.
+[Download the MP4](docs/media/lolping-ai-demo.mp4).
 
 ## Windows quick actions
 
