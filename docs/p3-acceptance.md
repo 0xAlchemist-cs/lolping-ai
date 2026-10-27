@@ -13,6 +13,10 @@ only for this single-screen scope.
 In a separate Win+L check on 2026-10-27, the user confirmed Alt wheel, website
 action and clearing all worked normally after unlocking the installed 0.6.0 build.
 This does not close UAC secure-desktop or actual login-start acceptance.
+The user subsequently waived the UAC prompt-return check for this delivery. Record
+it as untested and waived, not passed; it no longer blocks delivery. Actual login
+start remains deferred to a later normal login, and elevated-target activation is
+still unverified.
 
 Date: 2026-10-26. Baseline: `34f0e070500fbbbabfd24ba75b8c6008ce13f0e6`.
 Worktree: `D:/lolping/lolPing-p3`, branch `feat/p3a-windows-actions`.

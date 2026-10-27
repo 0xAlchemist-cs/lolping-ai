@@ -76,7 +76,8 @@ rescan. The latter tool is not exposed in this session.
 | Single-screen 100/150/200% DPI | User reported all requested checks passed at all three scales on the installed 0.6.0 build (2026-10-27); detailed scope below |
 | Mixed-monitor DPI and external display | Not tested: user has no external monitor; single-screen scaling does not establish these results |
 | Lock/unlock return | User reported Alt wheel, website action and clearing all normal after Win+L and unlock on installed 0.6.0 (2026-10-27) |
-| UAC secure-desktop return / elevated windows | Still pending; the lock/unlock check does not establish UAC behavior |
+| UAC prompt return | Not manually tested; user explicitly waived this check for this delivery on 2026-10-27. It is not a delivery blocker or a recorded pass |
+| Elevated target windows | Not verified; the waived UAC prompt-return check does not establish activation behavior for elevated targets |
 | Long run and physical P95 | Pending; previous controlled performance evidence stays in `p3-performance-verification.md` |
 | Current full-Main dispatch measurement | 100 real-Hook samples; P50 5.47 ms, P95 7.05 ms, max 11.12 ms at the controlled browser-request boundary; hardware/browser/native costs excluded |
 | Current same-machine idle comparison | 40/40 ABBA intervals plus 10/10 configured-enabled intervals; one input helper and zero desktop-helper launches in all trials; details in `p3-performance-verification.md` |
@@ -124,5 +125,7 @@ installed app at each scale:
 Record each scale independently and restore the user's original 125% afterward.
 This cannot establish mixed-DPI or external-display acceptance. In a separate
 Win+L check on 2026-10-27, the user confirmed the Alt wheel, website action and
-clearing all worked normally after unlock. UAC secure-desktop return and actual
-login start remain separate, unverified checks.
+clearing all worked normally after unlock. The user subsequently waived UAC
+prompt-return testing for this delivery; its result remains unverified. Actual
+login start was deferred to a later normal login. Neither result is inferred from
+the successful lock/unlock test.
