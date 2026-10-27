@@ -1,5 +1,9 @@
 # P3 local performance checkpoint
 
+This opening checkpoint is historical (2026-10-26). The current 0.6.0 follow-up is
+recorded at the end of this document. References below to unresolved restoration,
+no installation or no PR describe that older checkpoint; clearing is now one-way.
+
 Date: 2026-10-26. Windows 11 build 26100 x64, AMD Ryzen 7 8845HS, 16 logical processors.
 Launcher Node: 22.15.0. Measured Electron: 44.5.1, embedded Node: 24.21.0.
 
@@ -146,3 +150,50 @@ node tools/ping-actions-app-smoke.cjs --latency
 Do not run input injection alongside idle sampling. Outputs go to unique ignored run
 directories. The latency launcher streams progress every 20 samples and preserves raw
 values in its report; its ordinary invocation retains the separate lifecycle regression.
+
+## 0.6.0 follow-up (2026-10-27)
+
+Functional source: `ba2cf4c`, with documentation at `22b5956`. Windows 11 build 26100,
+16 logical processors, Electron 44.5.1. No production instrumentation or input-helper
+source changes were added for these runs. The dependency graph matches the approved
+baseline except for the two root version fields. Both idle variants used the same
+current input-helper binary, SHA-256
+`530e8152c267ab571924681ddd4bc06b0e52577dc44341379d5c121391d298bd`.
+
+The full-Main latency run passed with 100 distinct real-Hook releases, 102 Pings and
+102 controlled URL calls including setup/manual-test calls. Nearest-rank P50 was
+**5.47 ms**, P95 **7.05 ms**, maximum **11.12 ms**. Two guarded activation clicks
+were counted inside the owned fixture. There were zero program launches, activation
+jobs or external HTTP/API requests; input exited and settings persisted on shutdown.
+The scope remains Main receipt of `wheelRelease` to the controlled browser-request
+boundary. It excludes hardware/pipe delivery, real browser startup, application
+checks and desktop effects; it does not pass full physical-input P95 acceptance.
+
+The baseline/current/current/baseline idle comparison accepted every interval. An
+additional configured-enabled trial also accepted every interval:
+
+| Configuration | Accepted intervals | Mean CPU, one core | Median working-set sum | Median private allocation |
+| --- | --- | --- | --- | --- |
+| Approved baseline | 20 / 20 | 1.575% | 523.59 MiB | 353.36 MiB |
+| 0.6.0, default feature off | 20 / 20 | 1.420% | 521.22 MiB | 354.96 MiB |
+| 0.6.0, enabled with a saved web binding | 10 / 10 | 1.192% | 520.65 MiB | 355.06 MiB |
+
+The off-state comparison observed -0.155 percentage points of one-core CPU,
+-2.37 MiB of summed working set and +1.60 MiB of private allocation. These short
+observations do not establish a performance improvement or a long-run leak result.
+The enabled case is a separate single trial. CPU uses one logical core as 100%; the
+working-set sum can include shared pages more than once, and private allocation is
+not resident memory. All five trials observed exactly one input helper, zero desktop
+helper launches, zero external requests and input-helper exit on shutdown.
+
+Current artifacts (ignored, relative to this worktree):
+
+- `out/ping-actions-app-smoke/run-7anqLz/report.json`: 100 raw latency samples, exit 0.
+- `out/p3-performance/idle-lOsrHy/summary.json`: ABBA comparison, exit 0.
+- `out/p3-performance/idle-UWK6ct/summary.json`: configured-enabled trial, exit 0.
+
+No installed lolPing instance was running when the tests began or ended. All test
+instances used isolated profiles; no installed-app toggle or user settings were
+changed. Physical input, long runs, cold launches and UAC/elevated-window cases stay
+open. Single-screen DPI and lock/unlock acceptance are recorded separately in
+[release readiness](release-readiness.md).

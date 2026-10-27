@@ -9,7 +9,7 @@ observed results separately from physical acceptance and publication.
 | --- | --- | --- |
 | Update channel | Windows explicitly selects the fork GitHub feed; package metadata, macOS API and release-note fallback use the same repository | 64 update/config tests passed; actual installer feed verified; public release not published |
 | Login start | Packaged Windows startup repairs missing/current-path registrations. OS-disabled entries stay disabled; an explicit enable can re-enable them. Settings write only after the OS change succeeds | 7 synchronization tests and 2 settings transaction regressions passed; installed-app API confirms enabled registration; actual login pending |
-| Release/compatibility | 0.6.0 metadata; Release pipeline gates Windows native checks/package validation and waits for Windows/macOS/Linux artifacts | 1,431 app tests, production build, 10 preload checks and actual upgrade passed; user confirmed 100/150/200% single-screen checks; new CI and remaining physical matrix pending |
+| Release/compatibility | 0.6.0 metadata; Release pipeline gates Windows native checks/package validation and waits for Windows/macOS/Linux artifacts | 1,431 app tests, production build, 10 preload checks and actual upgrade passed; user confirmed 100/150/200% single-screen checks; three-platform CI passed for 22b5956; remaining physical matrix pending |
 | System program paths | Capture composition and dark-frame operations use fixed bundled-native DWM requests, removing both environment-selected PowerShell launches | Poisoned-SystemRoot regressions passed; 114 native protocol checks, 15 hidden-command checks and 4 real hidden-window DWM checks passed |
 
 ## Update destination
@@ -71,14 +71,17 @@ rescan. The latter tool is not exposed in this session.
 | 0.6.0 installer + 0.5.3 upgrade | Both real NSIS installers exited 0; version verified using app manifest/FileVersion; settings and encrypted key bytes unchanged from before both installs |
 | Installed login registration and hidden launch | Installed app started with `--hidden`; actual Electron readback reports openAtLogin=true, executableWillLaunchAtLogin=true and enabled own user entry |
 | Final 0.6.0 replacement | Reinstalled the final build; actual local Settings and enabled status observed while the Main process inherited a poisoned renderer URL; used the existing second-instance settings entry point |
-| Actual log-out / log-in | Pending user execution |
+| Actual log-out / log-in | Pending user execution; user explicitly deferred until a later normal restart/login |
 | Real input combinations and side buttons | Prior controlled-hook coverage exists; full physical matrix remains pending |
 | Single-screen 100/150/200% DPI | User reported all requested checks passed at all three scales on the installed 0.6.0 build (2026-10-27); detailed scope below |
 | Mixed-monitor DPI and external display | Not tested: user has no external monitor; single-screen scaling does not establish these results |
 | Lock/unlock return | User reported Alt wheel, website action and clearing all normal after Win+L and unlock on installed 0.6.0 (2026-10-27) |
 | UAC secure-desktop return / elevated windows | Still pending; the lock/unlock check does not establish UAC behavior |
 | Long run and physical P95 | Pending; previous controlled performance evidence stays in `p3-performance-verification.md` |
-| New three-platform CI / Release pipeline | Pending remote run |
+| Current full-Main dispatch measurement | 100 real-Hook samples; P50 5.47 ms, P95 7.05 ms, max 11.12 ms at the controlled browser-request boundary; hardware/browser/native costs excluded |
+| Current same-machine idle comparison | 40/40 ABBA intervals plus 10/10 configured-enabled intervals; one input helper and zero desktop-helper launches in all trials; details in `p3-performance-verification.md` |
+| New three-platform CI | [Run 40420471024](https://github.com/0xAlchemist-cs/lolping-ai/actions/runs/40420471024) passed Windows, macOS and Linux tests and packaging on exact head `22b5956815af11243a37782ecb801bba95ba879c`; latest branch checks are on [Draft PR #7](https://github.com/0xAlchemist-cs/lolping-ai/pull/7) |
+| Public Release pipeline | Tag-triggered publish workflow not run; no public release. [Bilingual draft release notes](releases/0.6.0.md) are ready for review |
 
 No missing physical check is counted as a pass, and no public release is recorded
 until the corresponding publish result has been observed.
