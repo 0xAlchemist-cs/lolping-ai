@@ -74,9 +74,10 @@ Windows 操作是：**按住 Alt，按下鼠标左键，拖到扇区后松开鼠
 
 触发键和鼠标侧键可在设置中调整。普通单击不会执行快捷动作。macOS 对应使用 Control 键。
 
-<p align="center"><img src="docs/media/demo.zh-CN.gif" width="880" alt="原有信号轮盘在桌面应用上方发出敌人消失信号"></p>
+https://github.com/user-attachments/assets/f1f9781a-1425-4763-86c4-01c346980feb
 
-动图展示基础轮盘，不展示 AI 或快捷动作设置。
+50 秒 Windows 实机演示（中文字幕）：表情轮盘、AI 问答、本地截图预览、网站与程序快捷动作，以及一键清屏。
+视频已剪去部分等待。[下载 MP4](docs/media/lolping-ai-demo.mp4)。
 
 ## Windows 快捷动作
 
