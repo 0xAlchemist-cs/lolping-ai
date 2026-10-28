@@ -80,6 +80,7 @@ function run() {
   let latencySummary = null;
   let measuringLatency = false, releasedAt = null, releaseConsumed = true;
   let externalRequests = 0, mainFetches = 0, programLaunches = 0, activationClicks = 0, dialogCalls = 0;
+  let syntheticAiFetches = 0, syntheticAiAborts = 0, allowSyntheticAi = false;
   let settingsWindow, controller;
   let stage = 'startup';
   let outcome = 'FAIL';
@@ -93,7 +94,8 @@ function run() {
     desktopEffectsVerified: false, inputExited: inputChildren.length === 1 && inputChildren.every(child => child.exitCode !== null || child.signalCode !== null),
     scenarios, wheelPings: wheelPings.length, recordedUrls: urls.length, nativeJobs: nativeJobs.length,
     nativeSystemJobs: systemJobs.length, nativeSystemBoundaryStubbed: true, unexpectedNativeJobs,
-    programLaunches, cancellationMs, releaseToUrlRequestMs, latencySummary, fixtureActivationClicks: activationClicks, mainFetches, externalRequests }));
+    programLaunches, cancellationMs, releaseToUrlRequestMs, latencySummary, fixtureActivationClicks: activationClicks,
+    syntheticAiFetches, syntheticAiAborts, mainFetches, externalRequests }));
   const wait = async (condition, why) => {
     const deadline = Date.now() + 8000;
     while (Date.now() < deadline) {
@@ -122,7 +124,21 @@ function run() {
   };
   shell.openExternal = recordOpen;
   check(shell.openExternal === recordOpen, 'browserBoundaryNotControlled');
-  globalThis.fetch = async () => { mainFetches++; throw new Error('unexpectedMainFetch'); };
+  process.env.LOLPING_AI_ALLOW_LOCALHOST = '1';
+  globalThis.fetch = async (url, init) => {
+    if (!allowSyntheticAi || url !== 'http://127.0.0.1:43123/v1/chat/completions') {
+      mainFetches++; throw new Error('unexpectedMainFetch');
+    }
+    check(init?.signal && new Headers(init.headers).get('authorization') === 'Bearer fixture-only-not-a-real-key', 'syntheticAiBoundaryInvalid');
+    syntheticAiFetches++;
+    return new Response(new ReadableStream({ start(stream) {
+      stream.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Synthetic stream"}}]}\n\n'));
+      init.signal.addEventListener('abort', () => {
+        syntheticAiAborts++;
+        stream.error(new DOMException('Synthetic cancellation', 'AbortError'));
+      }, { once: true });
+    } }), { headers: { 'Content-Type': 'text/event-stream' } });
+  };
   const selectFixture = async () => { dialogCalls++; checkpoint('pickerReturned'); return { canceled: false, filePaths: [process.execPath] }; };
   dialog.showOpenDialog = selectFixture;
   check(dialog.showOpenDialog === selectFixture, 'pickerBoundaryNotControlled');
@@ -321,7 +337,39 @@ report:()=>ipcRenderer.send(${JSON.stringify(OVERLAY_QUICK_ACTION)},{sessionId:9
       await set({ features: { ...(await current()).features, aiExplain: true } });
       await gesture('questionMarkWithAiOn', 'right', 'missing', 0);
       await wait(() => BrowserWindow.getAllWindows().some(win => win.webContents.getURL().includes('/explain/')), 'originalAiCardMissing');
+      await set({ aiBaseUrl: 'http://127.0.0.1:43123/v1', aiModel: 'fixture-model' });
+      check((await invoke('setAiKey', 'fixture-only-not-a-real-key')).ok, 'syntheticKeySetupFailed');
+      const questionWindow = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/explain/'));
+      await wait(() => questionWindow.webContents.executeJavaScript('typeof window.explainApi?.ask === "function"'), 'explainPreloadMissing');
+      check((await invoke('getAiStatus')).configured, 'syntheticAiNotConfigured');
+      await questionWindow.webContents.executeJavaScript('window.__masterTestEvents=[];window.explainApi.on(e=>window.__masterTestEvents.push({kind:e.kind,code:e.code}));true');
+      allowSyntheticAi = true;
+      const pendingQuestion = questionWindow.webContents.executeJavaScript('window.explainApi.ask("Fixture stream")').catch(() => null);
+      await wait(async () => {
+        const errors = await questionWindow.webContents.executeJavaScript('window.__masterTestEvents.filter(e=>e.kind==="error")');
+        check(!errors.length, `syntheticStreamRejected:${errors[0]?.code}`);
+        return syntheticAiFetches === 1;
+      }, 'syntheticStreamDidNotStart');
+      stage = 'masterOffClosesAiCard';
+      await set({ features: { ...(await current()).features, quickActions: false } });
+      await wait(() => !BrowserWindow.getAllWindows().some(win => win.webContents.getURL().includes('/explain/')), 'masterOffKeptAiCard');
+      check((await current()).features.aiExplain === true, 'masterOffChangedAiPreference');
+      await wait(() => syntheticAiAborts === 1, 'masterOffDidNotCancelAiStream');
+      await pendingQuestion;
+      allowSyntheticAi = false;
+      check((await current()).aiBaseUrl === 'http://127.0.0.1:43123/v1'
+        && (await current()).aiModel === 'fixture-model' && (await invoke('getAiStatus')).hasKey, 'masterOffLostAiConfiguration');
+      check(!(await invoke('getAiStatus')).configured, 'masterOffStillAllowsAiRequests');
+      pass('masterOffClosesAiCard');
+      await gesture('questionMarkWithMasterOff', 'right', 'missing', 0);
+      check(!BrowserWindow.getAllWindows().some(win => win.webContents.getURL().includes('/explain/')), 'masterOffOpenedAiCard');
+      await set({ features: { ...(await current()).features, quickActions: true } });
+      await gesture('questionMarkAfterMasterReenabled', 'right', 'missing', 0);
+      await wait(() => BrowserWindow.getAllWindows().some(win => win.webContents.getURL().includes('/explain/')), 'masterOnDidNotRestoreAi');
+      check((await invoke('getAiStatus')).configured, 'masterOnDidNotRestoreAiConfiguration');
       await set({ features: { ...(await current()).features, aiExplain: false }, wheel: DEFAULT_SETTINGS.wheel });
+      await wait(() => !BrowserWindow.getAllWindows().some(win => win.webContents.getURL().includes('/explain/')), 'aiSwitchOffKeptCard');
+      pass('aiSwitchStillClosesCard');
       await invoke('setEnabled', false);
       await gesture('actualPausePassThrough', 'right', null, 0, true);
       await invoke('setEnabled', true);

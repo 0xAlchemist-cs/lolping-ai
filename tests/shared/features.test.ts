@@ -1,7 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_FEATURES, featureOn, liveKeys, normalizeFeatures, roomFeaturesOff } from '../../src/shared/features';
+import { aiExplainOn, DEFAULT_FEATURES, featureOn, liveKeys, normalizeFeatures, roomFeaturesOff } from '../../src/shared/features';
 
 describe('features', () => {
+  it.each([
+    { aiExplain: false, quickActions: false, expected: false },
+    { aiExplain: false, quickActions: true, expected: false },
+    { aiExplain: true, quickActions: false, expected: false },
+    { aiExplain: true, quickActions: true, expected: true },
+  ])('requires both Windows switches for AI: $aiExplain / $quickActions', ({ expected, ...switches }) => {
+    const settings = { features: { ...DEFAULT_FEATURES, ...switches } };
+    const before = structuredClone(settings);
+    expect(aiExplainOn(settings, 'win')).toBe(expected);
+    expect(settings).toEqual(before);
+  });
+
+  it.each(['mac', 'linux'] as const)('keeps the existing independent AI switch on %s', (platform) => {
+    expect(aiExplainOn({ features: { ...DEFAULT_FEATURES, aiExplain: true } }, platform)).toBe(true);
+    expect(aiExplainOn({ features: { ...DEFAULT_FEATURES, quickActions: true } }, platform)).toBe(false);
+  });
+
   it('turns the room and emote features on by default, and optional fork features off', () => {
     expect(normalizeFeatures(undefined)).toEqual(DEFAULT_FEATURES);
     const { aiExplain, quickActions, ...rest } = DEFAULT_FEATURES;
