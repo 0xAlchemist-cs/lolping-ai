@@ -51,7 +51,7 @@ See [Packaging and checks](#packaging-and-checks) for installers and [Update cha
 Basic pings need no API key. After opening the app, use the tray icon to reach settings:
 
 - **Trigger / Wheel:** choose the trigger and arrange the eight slices. The default ping trigger is Alt; the emote trigger is Ctrl.
-- **Features → AI explain:** optional, off by default. Configure your service's HTTPS API base URL, model and API key.
+- **Features → AI explain:** optional, off by default. Configure your service's HTTPS API base URL, model and API key. On Windows, also enable the **Quick actions** switch.
 - **Quick actions** on Windows: optional, off by default, with no presets. Save an action, enable its binding and turn on the overall switch.
 
 Settings live in `%APPDATA%\lolPing\settings.json` on Windows, `~/Library/Application Support/lolPing/settings.json` on macOS, and the XDG configuration directory on Linux. API keys are encrypted separately in `ai-key.bin`, never stored as plaintext in `settings.json`. An unavailable encryption backend prevents saving a key.
@@ -84,6 +84,8 @@ website and program shortcuts, and screen clearing. Idle waits are shortened.
 
 In **Settings → Quick actions**, select an ordinary signal, configure its action and save. Any ordinary signal can run any supported action: for example, All In can clear the screen. The standard **Enemy Missing question mark is reserved for AI**, even when AI is off.
 
+On Windows this is also the question-mark AI master switch. Turning it off prevents new question cards, closes an existing card and cancels its request. Turning it on restores availability when **AI explain** is enabled; saved AI configuration and bindings are retained.
+
 The wheel keeps its original Ping images and shows no action names. Moving a signal to another slice carries its saved action; directions do not determine action types.
 
 | Type | Behavior |
@@ -100,7 +102,7 @@ Tray apps and launchers may reopen as another instance. Games may require their 
 
 ## AI explain (experimental)
 
-This fork adds an AI question window. Turn it on under **Settings → Features**, place an Enemy Missing ping with the wheel, and a small card opens where you type a question and the answer streams in. Everything about the ping itself — the wheel, the art, the sound, room sharing — is unchanged, and the feature is off by default.
+This fork adds an AI question window. Turn it on under **Settings → Features** and, on Windows, enable **Quick actions** as well. Place an Enemy Missing ping with the wheel, and a small card opens where you type a question and the answer streams in. Everything about the ping itself — the wheel, the art, the sound, room sharing — is unchanged, and the feature is off by default.
 
 You bring the service: fill in an **API base URL**, a **model name** and an **API key** for an OpenAI-compatible chat completions endpoint. Your questions and answers go to that service and nowhere else, and usage may cost money on that service’s plan. The key is encrypted with your system’s credential protection (safeStorage; DPAPI on Windows) and stored next to the settings — never in `settings.json`, never shown again, and **Remove key** forgets it. Packaged builds accept only HTTPS endpoints; loopback, private and local addresses are refused.
 

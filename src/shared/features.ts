@@ -1,4 +1,5 @@
 import type { RoomFeatureOff } from './roomProtocol';
+import type { Platform } from './platform';
 
 export type FeatureId = 'emotes' | 'rooms' | 'roomText' | 'roomVotes' | 'roomPanel' | 'aiExplain' | 'quickActions';
 export type Features = Record<FeatureId, boolean>;
@@ -39,6 +40,11 @@ export function roomFeaturesOff(s: { features: Features }): RoomFeatureOff[] {
 export function featureOn(s: { features: Features }, id: FeatureId): boolean {
   const entry = FEATURES.find((f) => f.id === id);
   return s.features[id] && (entry?.requires === undefined || s.features[entry.requires]);
+}
+
+/** Windows quick actions also gate question-mark AI without changing either saved preference. */
+export function aiExplainOn(s: { features: Features }, platform: Platform): boolean {
+  return featureOn(s, 'aiExplain') && (platform !== 'win' || featureOn(s, 'quickActions'));
 }
 
 /** Which room keys the helper listens for: they exist only in an active room, so Alt+T and Tab reach other apps otherwise. */

@@ -637,7 +637,11 @@ References: [GLM-5.3-Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3
 
 `features.quickActions` defaults to false. `quickActions` stores a version-1 map from non-`missing`
 Ping IDs to enabled/name/target bindings. Normalization drops malformed entries independently and always
-removes `missing`; the existing AI switch and report listener retain their behavior. Directions and wheel
+removes `missing`; the question mark remains AI-only. On Windows `aiExplainOn` requires both
+`features.aiExplain` and `features.quickActions`; macOS/Linux keep their independent AI switch.
+This effective predicate guards card creation and request availability. Switching it off closes
+the existing card, invalidates its temporary screenshot state and cancels the stream without changing
+the saved AI preference, endpoint, model or encrypted key. Directions and wheel
 positions are not action keys. Moving an icon preserves its binding, including when temporarily absent.
 
 The Windows-only Fluent settings page selects icons without executing them. Local drafts become effective

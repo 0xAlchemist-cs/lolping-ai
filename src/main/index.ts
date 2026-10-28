@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { resolveLang, strings, type Strings } from '../shared/i18n';
 import { SETTINGS_CH, type About, type AppStatus, type PanelAction, type PanelState } from '../shared/ipc';
 import { announcedEmoteHashes } from '../shared/emotes';
-import { featureOn, liveKeys, roomFeaturesOff } from '../shared/features';
+import { aiExplainOn, featureOn, liveKeys, roomFeaturesOff } from '../shared/features';
 import { hotkeyLabel } from '../shared/keys';
 import { LOGO_TEXTURE } from '../shared/pings';
 import { configCommand, type HelperStatus } from '../shared/protocol';
@@ -403,7 +403,7 @@ function start(): void {
   // The explain window opens only on the wheel's own Enemy Missing release: wheelPing comes from the overlay's
   // report alone, so trigger+click, previews and room members can never open it.
   overlays.on('wheelPing', (p: SharedPing) => {
-    if (p.id !== 'missing' || !featureOn(settings, 'aiExplain') || quitting) return;
+    if (p.id !== 'missing' || !aiExplainOn(settings, PLATFORM) || quitting) return;
     const display = screen.getAllDisplays().find((d) => d.id === p.displayId);
     if (!display) return;
     const point = process.platform === 'win32'
@@ -423,7 +423,7 @@ function start(): void {
   /** Development builds may point at a local mock server; a packaged build never may. Mirrors LOLPING_RELAYS' rule. */
   const aiAllowLocal = !app.isPackaged && process.env.LOLPING_AI_ALLOW_LOCALHOST === '1';
   const aiConfigured = (): boolean =>
-    featureOn(settings, 'aiExplain') && settings.aiBaseUrl.length > 0 && settings.aiModel.length > 0 && aiHasKey;
+    aiExplainOn(settings, PLATFORM) && settings.aiBaseUrl.length > 0 && settings.aiModel.length > 0 && aiHasKey;
   const aiCancel = (source?: CancelSource): void => aiRequests.cancel(source);
   /** Everything checked before any bytes leave: endpoint shape, model, key, and the DNS answer for the host. */
   async function aiPrepare(): Promise<
@@ -727,8 +727,8 @@ function start(): void {
       tray.setRoomsShown(featureOn(s, 'rooms'));
     }
     if (s.autoUpdateCheck !== previous.autoUpdateCheck) updater?.setAutoCheck(s.autoUpdateCheck);
-    // Switching the feature off closes its card: with aiExplain off, no window, no listener effects.
-    if (featureOn(s, 'aiExplain') !== featureOn(previous, 'aiExplain') && !featureOn(s, 'aiExplain')) {
+    // Close the card and its request when either effective AI switch is turned off.
+    if (aiExplainOn(previous, PLATFORM) && !aiExplainOn(s, PLATFORM)) {
       closeExplainWindow(); // its 'closed' handler cancels the stream too
       aiCancel();
     }

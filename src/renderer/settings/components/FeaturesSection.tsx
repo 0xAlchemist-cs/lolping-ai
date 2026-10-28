@@ -28,9 +28,11 @@ export function FeaturesSection({ settings: s, update }: { settings: Settings; u
     <>
       {FEATURES.filter(({ id }) => id !== 'quickActions' || api.platform === 'win').map(({ id, requires }) => {
         const blocked = requires !== undefined && !s.features[requires];
+        const description = t.featureDesc[id]
+          + (id === 'aiExplain' && api.platform === 'win' ? ` ${t.featureAiNeedsQuickActions}` : '');
         return (
           <SwitchRow key={id} icon={ICONS[id]} title={t.featureTitle[id]} dim={blocked} disabled={blocked}
-            description={blocked ? `${t.featureDesc[id]} ${t.featureNeedsRooms}` : t.featureDesc[id]}
+            description={blocked ? `${description} ${t.featureNeedsRooms}` : description}
             checked={s.features[id]} onChange={(v) => void update({ features: { ...s.features, [id]: v } })} />
         );
       })}
